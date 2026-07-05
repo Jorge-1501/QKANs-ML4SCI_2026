@@ -1,0 +1,92 @@
+--- pykan_original/kan/MultKAN.py	2026-04-24 23:46:28.121482100 -0600
++++ pykan/kan/MultKAN.py	2026-04-24 22:55:22.067694400 -0600
+@@ -418,8 +418,9 @@
+         return self.to(self.device)
+     
+     def log_history(self, method_name): 
++        return  # Cambio manual para tesis
+ 
+-        if self.auto_save:
++        """if self.auto_save:
+ 
+             # save to log file
+             #print(func.__name__)
+@@ -431,7 +432,7 @@
+ 
+             # save to ckpt
+             self.saveckpt(path=self.ckpt_path+'/'+str(self.round)+'.'+str(self.state_id))
+-            print('saving model version '+str(self.round)+'.'+str(self.state_id))
++            print('saving model version '+str(self.round)+'.'+str(self.state_id))"""
+ 
+     
+     def refine(self, new_grid):
+@@ -1020,7 +1021,7 @@
+             print('y range: [' + '%.2f' % y_min, ',', '%.2f' % y_max, ']')
+         return x_min, x_max, y_min, y_max
+ 
+-    def plot(self, folder="./figures", beta=3, metric='backward', scale=0.5, tick=False, sample=False, in_vars=None, out_vars=None, title=None, varscale=1.0):
++    def plot(self, folder="./figures", save_path = None, beta=3, metric='backward', scale=0.5, tick=False, sample=False, in_vars=None, out_vars=None, title=None, varscale=1.0):
+         '''
+         plot KAN
+         
+@@ -1077,7 +1078,7 @@
+         # matplotlib.use('Agg')
+         depth = len(self.width) - 1
+         for l in range(depth):
+-            w_large = 2.0
++            w_large = 4.0 * scale
+             for i in range(self.width_in[l]):
+                 for j in range(self.width_out[l+1]):
+                     rank = torch.argsort(self.acts[l][:, i])
+@@ -1307,7 +1308,12 @@
+ 
+         if title != None:
+             plt.gcf().get_axes()[0].text(0.5, (y0+z0) * (len(self.width) - 1) + 0.3, title, fontsize=40 * scale, horizontalalignment='center', verticalalignment='center')
+-
++        if save_path:
++            print(f'saving figure to {save_path}')
++            plt.savefig(save_path, bbox_inches="tight", dpi=400)
++            plt.close()
++        else:
++            plt.show()
+             
+     def reg(self, reg_metric, lamb_l1, lamb_entropy, lamb_coef, lamb_coefdiff):
+         '''
+@@ -2296,14 +2302,15 @@
+             for j in range(self.width_out[l + 1]):
+                 yj = 0.
+                 for i in range(self.width_in[l]):
+-                    a, b, c, d = self.symbolic_fun[l].affine[j, i]
++                    affine_params = self.symbolic_fun[l].affine[j, i].detach().cpu().numpy()
++                    a, b, c, d = float(affine_params[0]), float(affine_params[1]), float(affine_params[2]), float(affine_params[3])
+                     sympy_fun = self.symbolic_fun[l].funs_sympy[j][i]
+                     try:
+                         yj += c * sympy_fun(a * x[i] + b) + d
+                     except:
+                         print('make sure all activations need to be converted to symbolic formulas first!')
+                         return
+-                yj = self.subnode_scale[l][j] * yj + self.subnode_bias[l][j]
++                yj = self.subnode_scale[l][j].item() * yj + self.subnode_bias[l][j].item()
+                 if simplify == True:
+                     y.append(sympy.simplify(yj))
+                 else:
+@@ -2327,7 +2334,7 @@
+             y = y[:num_sum] + mult
+             
+             for j in range(self.width_in[l+1]):
+-                y[j] = self.node_scale[l][j] * y[j] + self.node_bias[l][j]
++                y[j] = self.node_scale[l][j].item() * y[j] + self.node_bias[l][j].item()
+             
+             x = y
+             symbolic_acts.append(x)
+--- pykan_original/kan/utils.py	2026-04-24 23:46:28.255771800 -0600
++++ pykan/kan/utils.py	2026-04-24 22:55:22.641817900 -0600
+@@ -160,7 +160,7 @@
+ 
+ 
+ 
+-def fit_params(x, y, fun, a_range=(-10,10), b_range=(-10,10), grid_number=101, iteration=3, verbose=True, device='cpu'):
++def fit_params(x, y, fun, a_range=(-10,10), b_range=(-10,10), grid_number=40, iteration=3, verbose=True, device='cpu'):
+     '''
+     fit a, b, c, d such that
+     

@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=2.4.6",
     "pandas>=2.9.0",
     "polars>=1.41.2",
+    "pykan",
     "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
     "tables>=3.11.0",
@@ -25,3 +26,9 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
+pykan = { workspace = true, editable = true }
+
+[tool.uv.workspace]
+members = [
+    "libs/pykan",
+]

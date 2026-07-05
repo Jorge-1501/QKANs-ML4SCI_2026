@@ -6,7 +6,8 @@ import pickle
 import numpy as np
 import torch
 import gc
-from sklearn.preprocessing import StandardScaler
+from pathlib import Path
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from pathlib import Path
 from src.utils.workspace import get_config, set_seed
 
@@ -19,139 +20,211 @@ from src.utils.workspace import get_config, set_seed
 def _compute_physics_features(raw_matrix, config, scaler=None):
     """
     Core math transformation. Combines macro-physics and Pareto sub-structure 
-    into a structured [N, 32] matrix ready for KAN / Random Forest baselines.
+    into a structured [N, m] matrix ready for KAN / Random Forest baselines. 
+    N is the number of jets and m is the number of features (2 + 2 * n_particles).
+    The last 4 features are the global jet four-momentum components (E, px, py, pz) and the 
+    rest are the four-momentum particle-level features.
+    The first two columns are global jet properties (scaled invariant mass and multiplicity), 
+    followed by pairs of columns for each particle: [dR_i, z_i].
+
+    - dr: Geometric distance of the i-th particle from the jet axis in the (eta, phi) plane.
+    - z: Fraction of the jet's transverse momentum carried by the i-th particle.
+
+    Parameters:
+    - raw_matrix: NumPy array of shape [N, 800] containing raw jet data.
+    - config: Configuration dictionary containing parameters for processing.
+    - scaler: Optional StandardScaler object for normalizing multiplicity.
+
+    return
+    - processed_matrix: NumPy array of shape [N, 2 + 2 * n_particles] containing processed features.
+    - scaler: StandardScaler object used for multiplicity normalization.
+    - mass_mask: Boolean array indicating which jets passed the invariant mass cut.
     """
-    # -----------------------
-    # 1. GLOBAL JET MASKING
-    # -----------------------
-    # Extract and sanitize global jet properties
-    px_jet_raw = raw_matrix[:, 800]
-    py_jet_raw = raw_matrix[:, 801]
-    pz_jet_raw = raw_matrix[:, 802]
-    E_jet_raw = raw_matrix[:, 803]
+    # -------------------------------------------------------------------------
+    # 1. Global Masking and Initial Geometric Reduction
+    # -------------------------------------------------------------------------
+    E_jet   = np.sum(raw_matrix[:, 0:800:4], axis=1)
+    px_jet  = np.sum(raw_matrix[:, 1:800:4], axis=1)
+    py_jet  = np.sum(raw_matrix[:, 2:800:4], axis=1)
+    pz_jet  = np.sum(raw_matrix[:, 3:800:4], axis=1)
 
-    # Jet angles
-    pt_jet_raw = np.sqrt(px_jet_raw**2 + py_jet_raw**2)
-    eta_jet_raw = -np.log(np.tan(np.arctan2(pt_jet_raw, pz_jet_raw + 1e-12) / 2.0) + 1e-12)
-    phi_jet_raw = np.arctan2(py_jet_raw, px_jet_raw + 1e-12)
-
-    # mask to E > 1e-6 and eta < 3.0 to avoid non-physical jets
-    valid_jet_mask = (E_jet_raw > 1e-6) & (np.abs(eta_jet_raw) < 3.0)
-    raw_matrix = raw_matrix[valid_jet_mask]
-    n_events = raw_matrix.shape[0]
-
-    # Clean up raw jet arrays to free memory
-    del px_jet_raw, py_jet_raw, pz_jet_raw, E_jet_raw, pt_jet_raw, eta_jet_raw, phi_jet_raw
-    gc.collect()
-
-    # Aplly mask to px_jet, py_jet, pz_jet, E_jet
-    px_jet = raw_matrix[:, 800]
-    py_jet = raw_matrix[:, 801]
-    pz_jet = raw_matrix[:, 802]
-    E_jet = raw_matrix[:, 803]
+    pt_jet  = np.sqrt(px_jet**2 + py_jet**2)
+    eta_jet = -np.log(np.tan(np.arctan2(pt_jet, pz_jet + 1e-12) / 2.0) + 1e-12)
+    phi_jet = np.arctan2(py_jet, px_jet + 1e-12)
 
     mass_sq = np.clip(E_jet**2 - (px_jet**2 + py_jet**2 + pz_jet**2), 0.0, None)
     invariant_mass = np.sqrt(mass_sq)
 
-    # Recompute angles after masking to ensure consistency
-    pt_jet = np.sqrt(px_jet**2 + py_jet**2)
-    eta_jet = -np.log(np.tan(np.arctan2(pt_jet, pz_jet + 1e-12) / 2.0) + 1e-12)
-    phi_jet = np.arctan2(py_jet, px_jet)
-
-    # ----------------------------------------
-    # 2. Local masking and feature engineering
-    # ----------------------------------------
-    # EXTRACT CARTESIAN FLOWS
-    p_x = raw_matrix[:, 0:800:4]
-    p_y = raw_matrix[:, 1:800:4]
-    p_z = raw_matrix[:, 2:800:4]
-    E   = raw_matrix[:, 3:800:4]
-
-    # CONSTITUENT MASKING (Layer 1)
-    # Identify valid particles based on detector coverage (|eta| < 3.0) and energy
-    theta_i = np.arctan2(np.sqrt(p_x**2 + p_y**2), p_z + 1e-12)
-    eta_i = -np.log(np.tan(theta_i / 2.0) + 1e-12)
-    phi_i = np.arctan2(p_y, p_x + 1e-12)
-
-    # Calculate relative coordinates
-    d_eta_i = eta_i - eta_jet[:, None]
-    d_phi_i = np.arctan2(
-                    np.sin(phi_i - phi_jet[:, None]),
-                    np.cos(phi_i - phi_jet[:, None])
-                    )
-    d_R = np.sqrt(d_eta_i**2 + d_phi_i**2)
-
-    # Combine jet-level and particle-level masks
-    particle_mask = (np.abs(eta_i) < 3.0) & (E > 1e-6) & (d_R < 0.8)
-
-    # Apply mask to constituents: force invalid particles to zero
-    p_x[~particle_mask] = 0.0
-    p_y[~particle_mask] = 0.0
-    p_z[~particle_mask] = 0.0
-    E[~particle_mask] = 0.0
-
-    pt_all = np.sqrt(p_x**2 + p_y**2)
-    multiplicity = np.sum(E > 1e-5, axis=1)
-
-    pt_block = pt_all[:, :15].copy()
-    d_R_block = d_R[:, :15].copy()
-    eta_i_block = eta_i[:, :15].copy()
-    mask_block = particle_mask[:, :15].copy()
-
-    # Clean up large intermediate arrays to free memory
-    del p_x, p_y, p_z, E, theta_i, eta_i #phi_i particle_mask
-    del d_eta_i, d_phi_i, d_R
+    del px_jet, py_jet, pz_jet, E_jet, pt_jet, mass_sq
     gc.collect()
 
-    # DYNAMIC NORMALIZATION
-    sum_pt = np.sum(pt_block, axis=1)
-    sum_pt_safe = np.where(sum_pt > 0, sum_pt, 1.0)
-    z_effective = pt_block / sum_pt_safe[:, None]
+    # Global kinematic filter for the Jet (Invariant Mass > 10 GeV)
+    mass_mask = invariant_mass > 10.0
+    invariant_mass = invariant_mass[mass_mask]
+    raw_matrix = raw_matrix[mass_mask]
+    eta_jet = eta_jet[mass_mask]
+    phi_jet = phi_jet[mass_mask]
+    
+    # Extract the raw global multiplicity before truncating the matrix
+    multiplicity = np.sum(raw_matrix[:, 0:800:4] > 1e-8, axis=1)
+    n_events = raw_matrix.shape[0]
 
-    z_effective[~mask_block] = 0.0
-    d_R_block[~mask_block] = 0.0
+    # Controlled reduction to the optimal window of 100 particles to save RAM
+    n_initial_particles = 100
+    
+    # Extract optimized local blocks in memory
+    px_block = raw_matrix[:, 1:n_initial_particles*4:4].copy()
+    py_block = raw_matrix[:, 2:n_initial_particles*4:4].copy()
+    pz_block = raw_matrix[:, 3:n_initial_particles*4:4].copy()
 
     # -------------------------------------------------------------------------
-    # 3. PHYSICAL VALIDATION LOGGING
+    # STEP 1 AND 2: GHOST IDENTIFICATION AND GEOMETRIC CLONING
     # -------------------------------------------------------------------------
-    if particle_mask.any():
-        print(
-            f"Rango de eta_i (procesado): {eta_i_block[mask_block].min():.2f} a {eta_i_block[mask_block].max():.2f}"
-        )
-    valid_dR = d_R_block[d_R_block > 0]
+    pt_block = np.sqrt(px_block**2 + py_block**2)
+    is_real = pt_block >= 1e-8
+
+    # Controlled initialization along the jet axis to mitigate artificial teleportation
+    eta_i = np.repeat(eta_jet[:, None], n_initial_particles, axis=1)
+    phi_i = np.repeat(phi_jet[:, None], n_initial_particles, axis=1)
+
+    theta_real = np.arctan2(pt_block[is_real], pz_block[is_real] + 1e-12)
+    eta_i[is_real] = -np.log(np.tan(theta_real / 2.0) + 1e-12)
+    phi_i[is_real] = np.arctan2(py_block[is_real], px_block[is_real] + 1e-12)
+    
+    del pz_block, px_block, py_block, theta_real
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # STEP 3: RELATIVE MINKOWSKI DISTANCE WITHOUT ASYMMETRIC ARTIFACTS
+    # -------------------------------------------------------------------------
+    d_eta_i = eta_i - eta_jet[:, None]
+    d_phi_i = np.arctan2(np.sin(phi_i - phi_jet[:, None]), np.cos(phi_i - phi_jet[:, None]))
+    d_R = np.sqrt(d_eta_i**2 + d_phi_i**2)
+
+    del phi_i, d_eta_i, d_phi_i
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # STEP 4: IN-PLACE PHYSICAL VIABILITY FILTER (EXCLUSIVE p_T SPRAY)
+    # -------------------------------------------------------------------------
+    # Filter: Outside the cone (> 0.80) OR outside the calorimeter acceptance (|eta| >= 3.0)
+    unphysical_mask = (~is_real) | (d_R > 0.80) | (np.abs(eta_i) >= 3.0)
+    pt_block[unphysical_mask] = 0.0
+
+    del eta_i, is_real, unphysical_mask
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # STEP 5: HIGH-SPEED SYNCHRONIZED SORTING
+    # -------------------------------------------------------------------------
+    sorted_indices = np.argsort(-pt_block, axis=1)
+    row_indices = np.arange(n_events)[:, None]
+    
+    pt_block = pt_block[row_indices, sorted_indices]
+    d_R = d_R[row_indices, sorted_indices]
+
+    del sorted_indices, row_indices
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # STEP 6: DYNAMIC AMPUTATION BY PARETO (80% CONE ENERGY THRESHOLD)
+    # -------------------------------------------------------------------------
+    pt_cumsum = np.cumsum(pt_block, axis=1)
+    pt_total_jet = pt_cumsum[:, -1]
+    
+    pt_total_cone_safe = np.where(pt_total_jet <= 0, 1.0, pt_total_jet)
+    pt_frac_cumsum = pt_cumsum / pt_total_cone_safe[:, None]
+    
+    idx_80 = np.argmax(pt_frac_cumsum >= 0.80, axis=1) + 1
+    n_particles = int(np.percentile(idx_80, 90))
+    n_particles = max(n_particles, 5) 
+
+    pt_block = pt_block[:, :n_particles]
+    d_R = d_R[:, :n_particles]
+
+    # CCompute the effective energy fraction z_effective relative to the purified cone
+    sum_pt_final = np.sum(pt_block, axis=1)
+    sum_pt_final_safe = np.where(sum_pt_final <= 0, 1.0, sum_pt_final)
+    z_effective = pt_block / sum_pt_final_safe[:, None]
+
+    # Forzar d_R a 0.0 en los canales vacíos remanentes de padding legítimo
+    d_R[pt_block <= 0.0] = 0.0
+
+    del pt_block, pt_cumsum, pt_frac_cumsum, sum_pt_final, sum_pt_final_safe, idx_80
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # PHYSICAL VALIDATION LOGGING
+    # -------------------------------------------------------------------------
+    '''
+    if (~is_ghost).any():
+        print(f"eta_i range (processed): {eta_i[:, :n_particles][~is_ghost].min():.2f} \
+        to {eta_i[:, :n_particles][~is_ghost].max():.2f}")
+    
+    valid_dR = d_R[d_R > 0]
     if valid_dR.size > 0:
-        print(
-            f"Rango de dR (partículas reales): {valid_dR.min():.2f} a {valid_dR.max():.2f}"
-        )
+        print(f"dR range (real particles): {valid_dR.min():.2f} to {valid_dR.max():.2f}")
 
-    # Check energy conservation constraints internally
+    print("\n*--- DYNAMIC CONSTITUENT AUDIT (PARETO 80%) ---*")
+    print(f"--> NUMBER OF CONSTITUENTS FIXED FOR THIS BATCH: {n_particles}")
+    print(f"Average individual index to capture 80% of p_T: {idx_80.mean():.2f}")
+    print(f"Minimum number of real particles in final window: {real_particles_per_jet.min()}")
+    print(f"Maximum number of real particles in final window: {real_particles_per_jet.max()}")
+    print(f"Average number of real particles in final window: {real_particles_per_jet.mean():.2f}")
+    print("*-----------------------------------------------------------*\n")
+    
     sum_z_test = np.sum(z_effective, axis=1)
     active_jets = sum_z_test > 0
     if active_jets.any():
         is_normalized = np.allclose(sum_z_test[active_jets], 1.0, atol=1e-3)
-        print(f"Test de Normalización Relativa (sum(z_i) == 1.0): {is_normalized}")
+        print(f"Relative Normalization Test (sum(z_i) == 1.0): {is_normalized}")
+    '''
 
-    # 4. QUANTUM ASYMPTOTIC COMPRESSION
-    m_scaled = np.tanh(np.log(invariant_mass + 1.0))
+    # -------------------------------------------------------------------------
+    # ASYMPTOTIC COMPRESSION AND GLOBAL VARIABLE NORMALIZATION
+    # -------------------------------------------------------------------------
+    # Invariant Mass: Log + RobustScaler + Asymptotic Tanh (Protects Outliers)
+    m_log = np.log(invariant_mass + 1.0)
+    del invariant_mass
     
+    robust_scaler = RobustScaler()
+    m_robust = robust_scaler.fit_transform(m_log.reshape(-1, 1)).flatten()
+    m_scaled = np.tanh(m_robust)
+    
+    del m_log, m_robust
+    gc.collect()
+
+    # Multiplicity: StandardScaler + Strict 3 Sigma Clip
+    # Preserves the real morphology of physical peaks without deforming tails
     if scaler is None:
         scaler = StandardScaler()
-        M_normalized = scaler.fit_transform(multiplicity.reshape(-1, 1)).flatten()
+        M_robust = scaler.fit_transform(multiplicity.reshape(-1, 1)).flatten()
     else:
-        M_normalized = scaler.transform(multiplicity.reshape(-1, 1)).flatten()
+        M_robust = scaler.transform(multiplicity.reshape(-1, 1)).flatten()
         
-    M_scaled = np.tanh(M_normalized)
+    del multiplicity
     
-    # 5. INTERLEAVE AND PACK COLUMNS [N, 32]
-    processed_matrix = np.zeros((n_events, 32), dtype=np.float32)
+    sigma_max = 3.0
+    M_clipped = np.clip(M_robust, -sigma_max, sigma_max)
+    M_scaled = M_clipped / sigma_max
+
+    del M_robust, M_clipped
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # INTERLEAVED PACKING COLUMNS [N, 2 + 2 * n_particles]
+    # -------------------------------------------------------------------------
+    processed_matrix = np.zeros((n_events, 2 + 2 * n_particles), dtype=np.float32)
     processed_matrix[:, 0] = m_scaled
     processed_matrix[:, 1] = M_scaled
     
-    for idx in range(15):
-        processed_matrix[:, 2 + 2*idx] = d_R_block[:, idx]      # Geometric parity columns
-        processed_matrix[:, 3 + 2*idx] = z_effective[:, idx] # Energetic fraction columns
+    processed_matrix[:, 2::2] = d_R
+    processed_matrix[:, 3::2] = z_effective
+    
+    del d_R, z_effective, m_scaled, M_scaled
+    gc.collect()
         
-    return processed_matrix, scaler, valid_jet_mask
+    return processed_matrix, scaler, mass_mask
 
 # ============================================================================
 # ============================================================================
@@ -171,7 +244,7 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     
     cache_file = PROCESSED_DIR / "preprocessed_data.pt"
-    scaler_file = config["scaler_path"]
+    scaler_file = Path(config["scaler_path"])
 
     # --- STEP 1: CACHE SYSTEM DETECTOR ---
     if cache_file.exists() and not force_process:
@@ -214,26 +287,40 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
             raw_matrix = f["values_block_0"][:]
             # Index 1 holds the categorical value (1: Top Signal, 0: QCD Background)
             raw_labels = f["values_block_1"][:, 1] 
-            
+
         print(f"Data chunk successfully mounted in RAM. Extracted shape: {raw_matrix.shape}")
         
+        # DIAGNÓSTICO ANTES DEL PROCESAMIENTO
+        print(f"--> Distribución CRUDA en disco de etiquetas para [{split.upper()}]:")
+        clases, conteos = np.unique(raw_labels, return_counts=True)
+        for c, n in zip(clases, conteos):
+            print(f"    Clase {c}: {n} eventos")
+
+        print(f"DEBUG ANTES: raw_matrix shape = {raw_matrix.shape}, raw_labels shape = {raw_labels.shape}")
+
+        X_norm, split_scaler, mask = _compute_physics_features(raw_matrix, config, scaler=scaler)
+
+        print(f"DEBUG DESPUÉS: X_norm shape = {X_norm.shape}, mask True count = {np.sum(mask)}")
+        print(f"DEBUG ETIQUETAS FILTRADAS: Ceros: {np.sum(raw_labels[mask] == 0)}, Unos: {np.sum(raw_labels[mask] == 1)}")
+
         # Transform vector components
-        X_norm, split_scaler, split_mask = _compute_physics_features(raw_matrix, config, scaler=scaler)
+        #X_norm, split_scaler, mask = _compute_physics_features(raw_matrix, config, scaler=scaler)
         
         if split == "train":
+            scaler = split_scaler
             with open(scaler_file, "wb") as f:
                 pickle.dump(split_scaler, f)
             print(f"Global scaler object saved to: '{scaler_file}'")
 
         # Convert straight to standalone float Torch tensors
         processed_tensors[f"X_{split}"] = torch.from_numpy(X_norm).float()
-        raw_labels = raw_labels[split_mask]
-        y_tensor = torch.from_numpy(raw_labels).float()
+        #raw_labels = raw_labels[mask]
+        y_tensor = torch.from_numpy(raw_labels[mask]).float()
         if y_tensor.ndim == 1:
             y_tensor = y_tensor.unsqueeze(1) # Match required [N, 1] output dimension
         processed_tensors[f"y_{split}"] = y_tensor
 
-        del raw_matrix, raw_labels, X_norm, split_mask, y_tensor
+        del raw_matrix, raw_labels, X_norm, y_tensor
         gc.collect()
 
     print("\n--- Final balanced datasets built (Vectorized Slices Framework) ---")
@@ -253,6 +340,10 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
     else:
         X_train_sample = X_train_all
     print(f"Warm-up tensor isolated. Size: {len(X_train_sample)} physics target nodes.")
+
+    # logging con clases únicas y conteo de ellas
+    print(f"Clases únicas en Train: {torch.unique(processed_tensors['y_train'])} con conteos: {torch.bincount(processed_tensors['y_train'].long().squeeze())}")
+    print(f"Clases únicas en Val: {torch.unique(processed_tensors['y_val'])} con conteos: {torch.bincount(processed_tensors['y_val'].long().squeeze())}")
 
     # --- STEP 4: MEMORY MAP CHECKPOINT SERIALIZATION ---
     processed_data = {
