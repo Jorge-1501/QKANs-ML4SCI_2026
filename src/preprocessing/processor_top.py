@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import gc
 from pathlib import Path
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from pathlib import Path
 from src.utils.workspace import get_config, set_seed
 
@@ -40,119 +40,122 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     - scaler: StandardScaler object used for multiplicity normalization.
     - mass_mask: Boolean array indicating which jets passed the invariant mass cut.
     """
-    # -----------------------
-    # 1. GLOBAL JET MASKING
-    # -----------------------
-    # Extract and sanitize global jet properties
-    E_jet = np.sum(raw_matrix[:, 0:800:4], axis=1)
-    px_jet = np.sum(raw_matrix[:, 1:800:4], axis=1)
-    py_jet = np.sum(raw_matrix[:, 2:800:4], axis=1)
-    pz_jet = np.sum(raw_matrix[:, 3:800:4], axis=1)
+    # -------------------------------------------------------------------------
+    # 1. Global Masking and Initial Geometric Reduction
+    # -------------------------------------------------------------------------
+    E_jet   = np.sum(raw_matrix[:, 0:800:4], axis=1)
+    px_jet  = np.sum(raw_matrix[:, 1:800:4], axis=1)
+    py_jet  = np.sum(raw_matrix[:, 2:800:4], axis=1)
+    pz_jet  = np.sum(raw_matrix[:, 3:800:4], axis=1)
 
-    # Jet angles
-    pt_jet = np.sqrt(px_jet**2 + py_jet**2)
+    pt_jet  = np.sqrt(px_jet**2 + py_jet**2)
     eta_jet = -np.log(np.tan(np.arctan2(pt_jet, pz_jet + 1e-12) / 2.0) + 1e-12)
     phi_jet = np.arctan2(py_jet, px_jet + 1e-12)
 
-    # Invariant mass calculation with clipping to avoid negative values
     mass_sq = np.clip(E_jet**2 - (px_jet**2 + py_jet**2 + pz_jet**2), 0.0, None)
     invariant_mass = np.sqrt(mass_sq)
 
-    # Clean up raw jet arrays to free memory
     del px_jet, py_jet, pz_jet, E_jet, pt_jet, mass_sq
     gc.collect()
 
-    # Use jets with invariant mass > 10 GeV to avoid unphysical jets
+    # Global kinematic filter for the Jet (Invariant Mass > 10 GeV)
     mass_mask = invariant_mass > 10.0
-    raw_matrix = raw_matrix[mass_mask]
     invariant_mass = invariant_mass[mass_mask]
+    raw_matrix = raw_matrix[mass_mask]
     eta_jet = eta_jet[mass_mask]
     phi_jet = phi_jet[mass_mask]
+    
+    # Extract the raw global multiplicity before truncating the matrix
+    multiplicity = np.sum(raw_matrix[:, 0:800:4] > 1e-8, axis=1)
     n_events = raw_matrix.shape[0]
 
-    # ----------------------------------------
-    # 2. Local masking and feature engineering
-    # ----------------------------------------
-
-    # EXTRACT CARTESIAN FLOWS
-    # we will only consider the first 50 particles for each jet to reduce dimensionality
-    # in this step, to improve preformance.
-    # Nevertheless, the raw_matrix has 200 particles (800 columns). In next steps we 
-    # will dynamically select the number of particles to keep based on the Pareto 80% rule.
-    n_particles = 50
-    p_x = raw_matrix[:, 1:n_particles*4:4]
-    p_y = raw_matrix[:, 2:n_particles*4:4]
-    p_z = raw_matrix[:, 3:n_particles*4:4]
-    E   = raw_matrix[:, 0:n_particles*4:4]
+    # Controlled reduction to the optimal window of 100 particles to save RAM
+    n_initial_particles = 100
     
-    pt_block = np.sqrt(p_x**2 + p_y**2)
-    # Identify ghost particles (pt < 1e-8) to mask them out
-    is_ghost = (pt_block < 1e-8)
+    # Extract optimized local blocks in memory
+    px_block = raw_matrix[:, 1:n_initial_particles*4:4].copy()
+    py_block = raw_matrix[:, 2:n_initial_particles*4:4].copy()
+    pz_block = raw_matrix[:, 3:n_initial_particles*4:4].copy()
 
-    # CONSTITUENT MASKING (Layer 1)
-    # Compute particle-level angles and pseudorapidities
-    theta_i = np.zeros_like(pt_block)
-    eta_i = np.zeros_like(pt_block)
-    phi_i = np.zeros_like(pt_block)
+    # -------------------------------------------------------------------------
+    # STEP 1 AND 2: GHOST IDENTIFICATION AND GEOMETRIC CLONING
+    # -------------------------------------------------------------------------
+    pt_block = np.sqrt(px_block**2 + py_block**2)
+    is_real = pt_block >= 1e-8
+
+    # Controlled initialization along the jet axis to mitigate artificial teleportation
+    eta_i = np.repeat(eta_jet[:, None], n_initial_particles, axis=1)
+    phi_i = np.repeat(phi_jet[:, None], n_initial_particles, axis=1)
+
+    theta_real = np.arctan2(pt_block[is_real], pz_block[is_real] + 1e-12)
+    eta_i[is_real] = -np.log(np.tan(theta_real / 2.0) + 1e-12)
+    phi_i[is_real] = np.arctan2(py_block[is_real], px_block[is_real] + 1e-12)
     
-    idx_real = ~is_ghost
-    theta_i[idx_real] = np.arctan2(pt_block[idx_real], p_z[idx_real] + 1e-12)
-    eta_i[idx_real] = -np.log(np.tan(theta_i[idx_real] / 2.0) + 1e-12)
-    phi_i[idx_real] = np.arctan2(p_y[idx_real], p_x[idx_real] + 1e-12)
+    del pz_block, px_block, py_block, theta_real
+    gc.collect()
 
-
-    # Calculate relative coordinates
+    # -------------------------------------------------------------------------
+    # STEP 3: RELATIVE MINKOWSKI DISTANCE WITHOUT ASYMMETRIC ARTIFACTS
+    # -------------------------------------------------------------------------
     d_eta_i = eta_i - eta_jet[:, None]
-    d_phi_i = np.arctan2(
-                    np.sin(phi_i - phi_jet[:, None]),
-                    np.cos(phi_i - phi_jet[:, None])
-                    )
+    d_phi_i = np.arctan2(np.sin(phi_i - phi_jet[:, None]), np.cos(phi_i - phi_jet[:, None]))
     d_R = np.sqrt(d_eta_i**2 + d_phi_i**2)
 
-    # Identify ghost particles based on pt and dR thresholds
-    is_ghost = (pt_block < 1e-8) | (d_R > 0.80)
+    del phi_i, d_eta_i, d_phi_i
+    gc.collect()
 
-    d_R[is_ghost] = 0.0
-    pt_block[is_ghost] = 0.0
+    # -------------------------------------------------------------------------
+    # STEP 4: IN-PLACE PHYSICAL VIABILITY FILTER (EXCLUSIVE p_T SPRAY)
+    # -------------------------------------------------------------------------
+    # Filter: Outside the cone (> 0.80) OR outside the calorimeter acceptance (|eta| >= 3.0)
+    unphysical_mask = (~is_real) | (d_R > 0.80) | (np.abs(eta_i) >= 3.0)
+    pt_block[unphysical_mask] = 0.0
 
-    multiplicity = np.sum(raw_matrix[:, 0:800:4] > 1e-8, axis=1)
-    # -------------------------
-    # DYNAMIC NORMALIZATION
-    # -------------------------
+    del eta_i, is_real, unphysical_mask
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # STEP 5: HIGH-SPEED SYNCHRONIZED SORTING
+    # -------------------------------------------------------------------------
+    sorted_indices = np.argsort(-pt_block, axis=1)
+    row_indices = np.arange(n_events)[:, None]
+    
+    pt_block = pt_block[row_indices, sorted_indices]
+    d_R = d_R[row_indices, sorted_indices]
+
+    del sorted_indices, row_indices
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # STEP 6: DYNAMIC AMPUTATION BY PARETO (80% CONE ENERGY THRESHOLD)
+    # -------------------------------------------------------------------------
     pt_cumsum = np.cumsum(pt_block, axis=1)
     pt_total_jet = pt_cumsum[:, -1]
-    pt_total_jet[pt_total_jet <= 0] = 1.0
-
-    pt_frac_cumsum = pt_cumsum / pt_total_jet[:, None]
-    # Index of the first particle where cumulative fraction exceeds 80%
+    
+    pt_total_cone_safe = np.where(pt_total_jet <= 0, 1.0, pt_total_jet)
+    pt_frac_cumsum = pt_cumsum / pt_total_cone_safe[:, None]
+    
     idx_80 = np.argmax(pt_frac_cumsum >= 0.80, axis=1) + 1
-
-    # Keep 90% of jets within the 80% cumulative pt threshold
     n_particles = int(np.percentile(idx_80, 90))
+    n_particles = max(n_particles, 5) 
 
-    # force a minimum of 5 particles to avoid empty jets
-    n_particles = max(n_particles, 5)
-
-    d_R = d_R[:, :n_particles]
     pt_block = pt_block[:, :n_particles]
-    is_ghost = is_ghost[:, :n_particles]
+    d_R = d_R[:, :n_particles]
 
-    real_particles_per_jet = np.sum(~is_ghost, axis=1)
+    # CCompute the effective energy fraction z_effective relative to the purified cone
+    sum_pt_final = np.sum(pt_block, axis=1)
+    sum_pt_final_safe = np.where(sum_pt_final <= 0, 1.0, sum_pt_final)
+    z_effective = pt_block / sum_pt_final_safe[:, None]
 
-    del p_x, p_y, p_z, theta_i, phi_i, d_eta_i, d_phi_i
-    del pt_cumsum, pt_frac_cumsum
+    # Forzar d_R a 0.0 en los canales vacíos remanentes de padding legítimo
+    d_R[pt_block <= 0.0] = 0.0
+
+    del pt_block, pt_cumsum, pt_frac_cumsum, sum_pt_final, sum_pt_final_safe, idx_80
     gc.collect()
 
-    sum_pt = np.sum(pt_block, axis=1)
-    sum_pt[sum_pt <= 0] = 1.0
-    z_effective = pt_block / sum_pt[:, None]
-    z_effective[is_ghost] = 0.0
-
-    del sum_pt
-    gc.collect()
-# -------------------------------------------------------------------------
-# 3. PHYSICAL VALIDATION LOGGING
-# -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # PHYSICAL VALIDATION LOGGING
+    # -------------------------------------------------------------------------
     '''
     if (~is_ghost).any():
         print(f"eta_i range (processed): {eta_i[:, :n_particles][~is_ghost].min():.2f} \
@@ -176,28 +179,50 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
         is_normalized = np.allclose(sum_z_test[active_jets], 1.0, atol=1e-3)
         print(f"Relative Normalization Test (sum(z_i) == 1.0): {is_normalized}")
     '''
-    del eta_i, real_particles_per_jet, idx_80, pt_block
+
+    # -------------------------------------------------------------------------
+    # ASYMPTOTIC COMPRESSION AND GLOBAL VARIABLE NORMALIZATION
+    # -------------------------------------------------------------------------
+    # Invariant Mass: Log + RobustScaler + Asymptotic Tanh (Protects Outliers)
+    m_log = np.log(invariant_mass + 1.0)
+    del invariant_mass
+    
+    robust_scaler = RobustScaler()
+    m_robust = robust_scaler.fit_transform(m_log.reshape(-1, 1)).flatten()
+    m_scaled = np.tanh(m_robust)
+    
+    del m_log, m_robust
     gc.collect()
 
-    # 4. QUANTUM ASYMPTOTIC COMPRESSION
-    m_scaled = np.tanh(np.log(invariant_mass + 1.0))
-    
+    # Multiplicity: StandardScaler + Strict 3 Sigma Clip
+    # Preserves the real morphology of physical peaks without deforming tails
     if scaler is None:
         scaler = StandardScaler()
-        M_normalized = scaler.fit_transform(multiplicity.reshape(-1, 1)).flatten()
+        M_robust = scaler.fit_transform(multiplicity.reshape(-1, 1)).flatten()
     else:
-        M_normalized = scaler.transform(multiplicity.reshape(-1, 1)).flatten()
+        M_robust = scaler.transform(multiplicity.reshape(-1, 1)).flatten()
         
-    M_scaled = np.tanh(M_normalized)
+    del multiplicity
     
-    # 5. INTERLEAVE AND PACK COLUMNS [N, 32]
+    sigma_max = 3.0
+    M_clipped = np.clip(M_robust, -sigma_max, sigma_max)
+    M_scaled = M_clipped / sigma_max
+
+    del M_robust, M_clipped
+    gc.collect()
+
+    # -------------------------------------------------------------------------
+    # INTERLEAVED PACKING COLUMNS [N, 2 + 2 * n_particles]
+    # -------------------------------------------------------------------------
     processed_matrix = np.zeros((n_events, 2 + 2 * n_particles), dtype=np.float32)
     processed_matrix[:, 0] = m_scaled
     processed_matrix[:, 1] = M_scaled
     
-    for idx in range(n_particles):
-        processed_matrix[:, 2 + 2*idx] = d_R[:, idx]      # Geometric parity columns
-        processed_matrix[:, 3 + 2*idx] = z_effective[:, idx] # Energetic fraction columns
+    processed_matrix[:, 2::2] = d_R
+    processed_matrix[:, 3::2] = z_effective
+    
+    del d_R, z_effective, m_scaled, M_scaled
+    gc.collect()
         
     return processed_matrix, scaler, mass_mask
 
@@ -259,9 +284,9 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
         with h5py.File(file_path, "r") as f:
             # Reconstruct structured event tables
             f = f["table"]["table"] # Navigate to the nested group containing the data
-            raw_matrix = f["values_block_0"][:100000]
+            raw_matrix = f["values_block_0"][:]
             # Index 1 holds the categorical value (1: Top Signal, 0: QCD Background)
-            raw_labels = f["values_block_1"][:100000, 1] 
+            raw_labels = f["values_block_1"][:, 1] 
 
         print(f"Data chunk successfully mounted in RAM. Extracted shape: {raw_matrix.shape}")
         

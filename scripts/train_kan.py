@@ -17,6 +17,22 @@ import argparse
 import gc
 from pathlib import Path
 
+class TeedLog:
+    """
+    Clone sys.stdout to log messages to both the console and a file.
+    """
+    def __init__(self, filename):
+        self.terminal = sys.stdout
+        self.log = open(filename, "w", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message) 
+        self.log.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
 def main(args):
     """Main fuction to run the full training pipeline."""
     torch.set_num_threads(4)  # Limit PyTorch to use 4 CPU threads for data loading and processing
@@ -24,6 +40,11 @@ def main(args):
     
     CONFIG = workspace.get_config(task="top", seed=args.seed)
     workspace.make_dirs(CONFIG)
+
+    # === Clone sys.stdout to log messages to both the console and a file ===
+    log_file_path = os.path.join(CONFIG["processed_data_dir"], f"training_seed_{args.seed}.log")
+    sys.stdout = TeedLog(log_file_path)
+    # ==================================
     
     start_time = time.time()
     print(f"Starting the automated training pipeline. Seed: {args.seed}.")
@@ -41,7 +62,7 @@ def main(args):
                                         data_dir=top_path,
                                         processed_dir=CONFIG["processed_data_dir"],
                                         task=CONFIG["task"],
-                                        force_process=False
+                                        force_process=True
                                     )
     del top_path
     gc.collect()
@@ -74,10 +95,10 @@ def main(args):
             lamb_coefdiff=CONFIG["base_lamb_coefdiff"],
             update_grid_freq=CONFIG["base_update_grid_freq"],
             model_save_path=base_model_prefix,
-            X_train_tensor=X_train[:],
-            y_train_tensor=y_train[:],
-            X_val_tensor=X_val[:10000], 
-            y_val_tensor=y_val[:10000],
+            X_train_tensor=X_train,
+            y_train_tensor=y_train,
+            X_val_tensor=X_val, 
+            y_val_tensor=y_val,
             num_workers=CONFIG["num_workers"]
         )
         
@@ -90,8 +111,8 @@ def main(args):
         print("\n--- Evaluation of Base Model ---")
         model_base, eval_data_base, metrics_base = classic.evaluate_kan_model(
             model_save_path=base_model_prefix,
-            X_test_tensor=X_test[:10000],
-            y_test_tensor=y_test[:10000],
+            X_test_tensor=X_test,
+            y_test_tensor=y_test,
             conf_matrix_save_path=CONFIG["base_eval_cm"],
             save_path_roc_curve=CONFIG["base_eval_roc"],
             save_path_pr_curve=CONFIG["base_eval_pr"]

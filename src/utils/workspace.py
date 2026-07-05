@@ -73,25 +73,23 @@ def get_config(task, seed):
         "cache_file": os.path.join(data_out_dir, "preprocessed_data.pt"),
         
         # Output targets for models and reports
-        "models_dir": os.path.join(outputs_dir, "models"),
+        "models_dir": os.path.join(outputs_dir, "models", "01_base"),
         "plots_dir": os.path.join(outputs_dir, "plots"),
         "results_dir": os.path.join(outputs_dir, "results"),
 
         # reports
-        "base_train_history_data": os.path.join(outputs_dir, "results", "base_train_history.json"),
-        "base_train_loss_plot": os.path.join(outputs_dir, "plots", "base_train_loss.png"),
-        "base_train_auc_plot": os.path.join(outputs_dir, "plots", "base_train_auc.png"),
+        "base_train_history_data": os.path.join(outputs_dir, "results", "01_base", "base_train_history.json"),
+        "base_eval_data_true": os.path.join(outputs_dir, "results", "01_base", "base_eval_true.npy"),
+        "base_eval_data_probs": os.path.join(outputs_dir, "results", "01_base", "base_eval_probs.npy"),
+        "base_eval_data_binary": os.path.join(outputs_dir, "results", "01_base", "base_eval_binary.npy"),
+        "base_eval_metrics": os.path.join(outputs_dir, "results", "01_base", "base_eval_metrics.json"),
 
-        # Evaluation
-        "base_eval_cm": os.path.join(outputs_dir, "plots", "base_eval_cm.png"),
-        "base_eval_roc": os.path.join(outputs_dir, "plots", "base_eval_roc.png"),
-        "base_eval_pr": os.path.join(outputs_dir, "plots", "base_eval_pr.png"),
-
-        "base_eval_data_true": os.path.join(outputs_dir, "results", "base_eval_true.npy"),
-        "base_eval_data_probs": os.path.join(outputs_dir, "results", "base_eval_probs.npy"),
-        "base_eval_data_binary": os.path.join(outputs_dir, "results", "base_eval_binary.npy"),
-
-        "base_eval_metrics": os.path.join(outputs_dir, "results", "base_eval_metrics.json"),
+        # plots
+        "base_train_loss_plot": os.path.join(outputs_dir, "plots", "01_plot_base", "base_train_loss.png"),
+        "base_train_auc_plot": os.path.join(outputs_dir, "plots", "01_plot_base", "base_train_auc.png"),
+        "base_eval_cm": os.path.join(outputs_dir, "plots", "01_plot_base", "base_eval_cm.png"),
+        "base_eval_roc": os.path.join(outputs_dir, "plots", "01_plot_base", "base_eval_roc.png"),
+        "base_eval_pr": os.path.join(outputs_dir, "plots", "01_plot_base", "base_eval_pr.png"),
 
         "base_model_plot_folder": os.path.join(outputs_dir, "plots", "01_plot_base", "splines"),
         "base_model_plot_save_path": os.path.join(outputs_dir, "plots", "01_plot_base", "base_model.png"),
