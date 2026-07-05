@@ -20,7 +20,25 @@ from src.utils.workspace import get_config, set_seed
 def _compute_physics_features(raw_matrix, config, scaler=None):
     """
     Core math transformation. Combines macro-physics and Pareto sub-structure 
-    into a structured [N, 32] matrix ready for KAN / Random Forest baselines.
+    into a structured [N, m] matrix ready for KAN / Random Forest baselines. 
+    N is the number of jets and m is the number of features (2 + 2 * n_particles).
+    The last 4 features are the global jet four-momentum components (E, px, py, pz) and the 
+    rest are the four-momentum particle-level features.
+    The first two columns are global jet properties (scaled invariant mass and multiplicity), 
+    followed by pairs of columns for each particle: [dR_i, z_i].
+
+    - dr: Geometric distance of the i-th particle from the jet axis in the (eta, phi) plane.
+    - z: Fraction of the jet's transverse momentum carried by the i-th particle.
+
+    Parameters:
+    - raw_matrix: NumPy array of shape [N, 800] containing raw jet data.
+    - config: Configuration dictionary containing parameters for processing.
+    - scaler: Optional StandardScaler object for normalizing multiplicity.
+
+    return
+    - processed_matrix: NumPy array of shape [N, 2 + 2 * n_particles] containing processed features.
+    - scaler: StandardScaler object used for multiplicity normalization.
+    - mass_mask: Boolean array indicating which jets passed the invariant mass cut.
     """
     # -----------------------
     # 1. GLOBAL JET MASKING
@@ -36,6 +54,7 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     eta_jet = -np.log(np.tan(np.arctan2(pt_jet, pz_jet + 1e-12) / 2.0) + 1e-12)
     phi_jet = np.arctan2(py_jet, px_jet + 1e-12)
 
+    # Invariant mass calculation with clipping to avoid negative values
     mass_sq = np.clip(E_jet**2 - (px_jet**2 + py_jet**2 + pz_jet**2), 0.0, None)
     invariant_mass = np.sqrt(mass_sq)
 
@@ -56,6 +75,10 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     # ----------------------------------------
 
     # EXTRACT CARTESIAN FLOWS
+    # we will only consider the first 50 particles for each jet to reduce dimensionality
+    # in this step, to improve preformance.
+    # Nevertheless, the raw_matrix has 200 particles (800 columns). In next steps we 
+    # will dynamically select the number of particles to keep based on the Pareto 80% rule.
     n_particles = 50
     p_x = raw_matrix[:, 1:n_particles*4:4]
     p_y = raw_matrix[:, 2:n_particles*4:4]
@@ -63,10 +86,11 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     E   = raw_matrix[:, 0:n_particles*4:4]
     
     pt_block = np.sqrt(p_x**2 + p_y**2)
+    # Identify ghost particles (pt < 1e-8) to mask them out
     is_ghost = (pt_block < 1e-8)
 
     # CONSTITUENT MASKING (Layer 1)
-    # Identify valid particles based on detector coverage (|eta| < 3.0) and energy
+    # Compute particle-level angles and pseudorapidities
     theta_i = np.zeros_like(pt_block)
     eta_i = np.zeros_like(pt_block)
     phi_i = np.zeros_like(pt_block)
@@ -85,6 +109,7 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
                     )
     d_R = np.sqrt(d_eta_i**2 + d_phi_i**2)
 
+    # Identify ghost particles based on pt and dR thresholds
     is_ghost = (pt_block < 1e-8) | (d_R > 0.80)
 
     d_R[is_ghost] = 0.0
@@ -126,30 +151,31 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     del sum_pt
     gc.collect()
 # -------------------------------------------------------------------------
-    # 3. PHYSICAL VALIDATION LOGGING
-    # -------------------------------------------------------------------------
+# 3. PHYSICAL VALIDATION LOGGING
+# -------------------------------------------------------------------------
+    '''
     if (~is_ghost).any():
-        print(f"Rango de eta_i (procesado): {eta_i[:, :n_particles][~is_ghost].min():.2f} \
-        a {eta_i[:, :n_particles][~is_ghost].max():.2f}")
+        print(f"eta_i range (processed): {eta_i[:, :n_particles][~is_ghost].min():.2f} \
+        to {eta_i[:, :n_particles][~is_ghost].max():.2f}")
     
     valid_dR = d_R[d_R > 0]
     if valid_dR.size > 0:
-        print(f"Rango de dR (partículas reales): {valid_dR.min():.2f} a {valid_dR.max():.2f}")
+        print(f"dR range (real particles): {valid_dR.min():.2f} to {valid_dR.max():.2f}")
 
-    print("\n*--- AUDITORÍA DE CONSTITUYENTES DINÁMICOS (PARETO 80%) ---*")
-    print(f"--> NUMERO DE CONSTITUYENTES FIJADO PARA ESTE LOTE: {n_particles}")
-    print(f"Índice promedio individual para capturar el 80% de p_T: {idx_80.mean():.2f}")
-    print(f"Número MÍNIMO de partículas reales en ventana final: {real_particles_per_jet.min()}")
-    print(f"Número MÁXIMO de partículas reales en ventana final: {real_particles_per_jet.max()}")
-    print(f"Promedio de partículas reales en ventana final: {real_particles_per_jet.mean():.2f}")
+    print("\n*--- DYNAMIC CONSTITUENT AUDIT (PARETO 80%) ---*")
+    print(f"--> NUMBER OF CONSTITUENTS FIXED FOR THIS BATCH: {n_particles}")
+    print(f"Average individual index to capture 80% of p_T: {idx_80.mean():.2f}")
+    print(f"Minimum number of real particles in final window: {real_particles_per_jet.min()}")
+    print(f"Maximum number of real particles in final window: {real_particles_per_jet.max()}")
+    print(f"Average number of real particles in final window: {real_particles_per_jet.mean():.2f}")
     print("*-----------------------------------------------------------*\n")
     
     sum_z_test = np.sum(z_effective, axis=1)
     active_jets = sum_z_test > 0
     if active_jets.any():
         is_normalized = np.allclose(sum_z_test[active_jets], 1.0, atol=1e-3)
-        print(f"Test de Normalización Relativa (sum(z_i) == 1.0): {is_normalized}")
-
+        print(f"Relative Normalization Test (sum(z_i) == 1.0): {is_normalized}")
+    '''
     del eta_i, real_particles_per_jet, idx_80, pt_block
     gc.collect()
 

@@ -5,11 +5,11 @@ import torch
 import random
 from pathlib import Path
 
-features_globales = ['invariant_mass', 'total_multiplicity']
+features_globales = ['m', 'n']
 features_locales = []
 for i in range(1, 11):
-    features_locales.append(f'Delta_R_part_{i}')
-    features_locales.append(f'pT_rel_part_{i}')
+    features_locales.append(rf'DR_{i}')
+    features_locales.append(rf'pT_{i}')
 
 TOTAL_FEATURES = features_globales + features_locales
 
@@ -99,6 +99,53 @@ def get_config(task, seed):
         # Pruned
         "pruned_model_path": os.path.join(outputs_dir, "models", "02_pruned"),
 
+        # Re-trained
+        "retrained_model_path": os.path.join(outputs_dir, "models", "03_retrained"),
+        "retrain_history_data": os.path.join(outputs_dir, "results", "03_retrained", "retrain_history.json"),
+        "retrain_loss_plot": os.path.join(outputs_dir, "plots", "03_retrained", "retrain_loss.png"),
+        "retrain_auc_plot": os.path.join(outputs_dir, "plots", "03_retrained", "retrain_auc.png"),
+        "retrain_eval_cm": os.path.join(outputs_dir, "plots", "03_retrained", "retrain_eval_cm.png"),
+        "retrain_eval_roc": os.path.join(outputs_dir, "plots", "03_retrained", "retrain_eval_roc.png"),
+        "retrain_eval_pr": os.path.join(outputs_dir, "plots", "03_retrained", "retrain_eval_pr.png"),
+        "retrain_eval_data_true": os.path.join(outputs_dir, "results", "03_retrained", "retrain_eval_true.npy"),
+        "retrain_eval_data_probs": os.path.join(outputs_dir, "results", "03_retrained", "retrain_eval_probs.npy"),
+        "retrain_eval_data_binary": os.path.join(outputs_dir, "results", "03_retrained", "retrain_eval_binary.npy"),
+        "retrain_eval_metrics": os.path.join(outputs_dir, "results", "03_retrained", "retrain_eval_metrics.json"),
+        "retrained_model_plot_folder": os.path.join(outputs_dir, "plots", "03_retrained", "splines"),
+        "retrained_model_plot_save_path": os.path.join(outputs_dir, "plots", "03_retrained", "retrained_model.png"),
+
+        # symbolic simplification
+        "symbolic_model_path": os.path.join(outputs_dir, "models", "04_symbolic"),
+        "symbolic_model_plot_folder": os.path.join(outputs_dir, "plots", "04_symbolic", "splines"),
+        "symbolic_model_plot_save_path": os.path.join(outputs_dir, "plots", "04_symbolic", "symbolic_model.png"),
+        "symbolic_model_eval_data": os.path.join(outputs_dir, "results", "04_symbolic", "symbolic_model_eval_data.json"),
+        "symbolic_eval_cm": os.path.join(outputs_dir, "plots", "04_symbolic", "symbolic_eval_cm.png"),
+        "symbolic_eval_roc": os.path.join(outputs_dir, "plots", "04_symbolic", "symbolic_eval_roc.png"),
+        "symbolic_eval_pr": os.path.join(outputs_dir, "plots", "04_symbolic", "symbolic_eval_pr.png"),
+        "symbolic_eval_data_true": os.path.join(outputs_dir, "results", "04_symbolic", "symbolic_eval_true.npy"),
+        "symbolic_model_eval_probs": os.path.join(outputs_dir, "results", "04_symbolic", "symbolic_eval_probs.npy"),
+        "symbolic_model_eval_binary": os.path.join(outputs_dir, "results", "04_symbolic", "symbolic_eval_binary.npy"),
+        "symbolic_eval_metrics": os.path.join(outputs_dir, "results", "04_symbolic", "symbolic_eval_metrics.json"),
+        "symbolic_history_data": os.path.join(outputs_dir, "results", "04_symbolic", "symbolic_history.json"),
+        "symbolic_loss_plot": os.path.join(outputs_dir, "plots", "04_symbolic", "symbolic_loss.png"),
+        "symbolic_auc_plot": os.path.join(outputs_dir, "plots", "04_symbolic", "symbolic_auc.png"),
+
+        # final fine-tuning
+        "final_model_path": os.path.join(outputs_dir, "models", "05_final"),
+        "final_eval_cm": os.path.join(outputs_dir, "plots", "05_final", "final_eval_cm.png"),
+        "final_eval_roc": os.path.join(outputs_dir, "plots", "05_final", "final_eval_roc.png"),
+        "final_eval_pr": os.path.join(outputs_dir, "plots", "05_final", "final_eval_pr.png"),
+        "final_eval_data_true": os.path.join(outputs_dir, "results", "05_final", "final_eval_true.npy"),
+        "final_eval_data_probs": os.path.join(outputs_dir, "results", "05_final", "final_eval_probs.npy"),
+        "final_eval_data_binary": os.path.join(outputs_dir, "results", "05_final", "final_eval_binary.npy"),
+        "final_eval_metrics": os.path.join(outputs_dir, "results", "05_final", "final_eval_metrics.json"),
+        "final_formula_path": os.path.join(outputs_dir, "results", "05_final", "final_formula.txt"),
+        "final_model_plot_folder": os.path.join(outputs_dir, "plots", "05_final", "splines"),
+        "final_model_plot_save_path": os.path.join(outputs_dir, "plots", "05_final", "final_model.png"),
+        "final_history_data": os.path.join(outputs_dir, "results", "05_final", "final_history.json"),
+        "final_loss_plot": os.path.join(outputs_dir, "plots", "05_final", "final_loss.png"),
+        "final_auc_plot": os.path.join(outputs_dir, "plots", "05_final", "final_auc.png"),
+
         # -----------------------------
         # --- Classic KAN ----
         # -----------------------------
@@ -124,5 +171,27 @@ def get_config(task, seed):
         # --- Pruning Hyperparameters ---
         "prune_node_th": 1e-2,
         "prune_edge_th": 3e-2,
+
+        # --- Re-training Hyperparameters ---
+        "retrain_lr": 1e-3,
+        "retrain_epochs": 20,
+        "retrain_batch_size": 8192,
+        "retrain_patience": 6,
+        "retrain_early_stop_delta": 5e-5,
+        "retrain_lamb_l1": 0.1,
+        "retrain_lamb_entropy": 0.2,
+        "retrain_lamb_coef": 0.005,
+        "retrain_lamb_coefdiff": 0.01,
+
+        # --- Simplification (Fitting) Hyperparameters ---
+        "symbolic_r2_threshold": 0.8,
+        "symbolic_weight_simple": 0.5,
+
+        # --- Fine-Tuning Hyperparameters ---
+        "finetune_lr": 5e-5, # Lower learning rate
+        "finetune_epochs": 15,
+        "finetune_batch_size": 512,
+        "finetune_patience": 5,
+        "finetune_early_stop_delta": 1e-6
     }
     return CONFIG
