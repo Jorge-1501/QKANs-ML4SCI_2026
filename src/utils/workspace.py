@@ -144,6 +144,55 @@ def get_config(task, seed):
         "final_loss_plot": os.path.join(outputs_dir, "plots", "05_final", "final_loss.png"),
         "final_auc_plot": os.path.join(outputs_dir, "plots", "05_final", "final_auc.png"),
 
+        # ----------------------------
+        # --- Report quantum Paths ---
+        # ----------------------------
+        # Chebyshev coefficients txt paths
+        "Chebyshev_coefficients_path": os.path.join(outputs_dir, "results", "chebyshev_coefficients.txt"),
+        "circuit_plot": os.path.join(outputs_dir, "plots", "quantum-circuit.png"),
+        "qkan_metadata_path": os.path.join(outputs_dir, "results", "qkan_metadata.json"),
+
+        # Reports - QKAN evaluation - Noisy
+        "roc_qkan_noisy": os.path.join(outputs_dir, "plots", "qkan","noisy", "roc_qkan_noisy.png"),
+        "pr_qkan_noisy": os.path.join(outputs_dir, "plots", "qkan","noisy", "pr_qkan_noisy.png"),
+        "cm_qkan_noisy": os.path.join(outputs_dir, "plots", "qkan","noisy", "cm_qkan_noisy.png"),
+        "metrics_qkan_noisy": os.path.join(outputs_dir, "results", "qkan","noisy", "metrics_qkan_noisy.json"),
+        "history_noisy_loss": os.path.join(outputs_dir, "results", "qkan","noisy", "history_loss.json"),
+        "history_noisy_loss_plot": os.path.join(outputs_dir, "plots", "qkan","noisy", "history_loss.png"),
+        "history_noisy_auc_plot": os.path.join(outputs_dir, "plots", "qkan","noisy", "history_auc.png"),
+
+        # Reports - QKAN evaluation - Ideal
+        "roc_qkan_ideal": os.path.join(outputs_dir, "plots", "qkan","ideal", "roc_qkan_ideal.png"),
+        "pr_qkan_ideal": os.path.join(outputs_dir, "plots", "qkan","ideal", "pr_qkan_ideal.png"),
+        "cm_qkan_ideal": os.path.join(outputs_dir, "plots", "qkan","ideal", "cm_qkan_ideal.png"),
+        "metrics_qkan_ideal": os.path.join(outputs_dir, "results", "qkan","ideal", "metrics_qkan_ideal.json"),
+        "history_ideal_loss": os.path.join(outputs_dir, "results", "qkan","ideal", "history_loss.json"),
+        "history_ideal_loss_plot": os.path.join(outputs_dir, "plots", "qkan","ideal", "history_loss.png"),
+        "history_ideal_auc_plot": os.path.join(outputs_dir, "plots", "qkan","ideal", "history_auc.png"),
+
+        # Reports - QKAN evaluation - Shots
+        "roc_qkan_shots": os.path.join(outputs_dir, "plots", "qkan","shots", "roc_qkan_shots.png"),
+        "pr_qkan_shots": os.path.join(outputs_dir, "plots", "qkan","shots", "pr_qkan_shots.png"),
+        "cm_qkan_shots": os.path.join(outputs_dir, "plots", "qkan","shots", "cm_qkan_shots.png"),
+        "metrics_qkan_shots": os.path.join(outputs_dir, "results", "qkan","shots", "metrics_qkan_shots.json"),
+        "history_shots_loss": os.path.join(outputs_dir, "results", "qkan","shots", "history_loss.json"),
+        "history_shots_loss_plot": os.path.join(outputs_dir, "plots", "qkan","shots", "history_loss.png"),
+        "history_shots_auc_plot": os.path.join(outputs_dir, "plots", "qkan","shots", "history_auc.png"),
+
+        "init_weights": os.path.join(data_out_dir, "quantum_weights"),
+
+        # Quantum model and weights
+        "polynomial_weights_dir": os.path.join(data_out_dir, "quantum_weights"),
+        "coef_n_path": os.path.join(data_out_dir, "quantum_weights", "w_n.npy"),
+        "coef_q_path": os.path.join(data_out_dir, "quantum_weights", "w_q.npy"),
+        "coef_z_path": os.path.join(data_out_dir, "quantum_weights", "w_z.npy"),
+        "coef_dr_path": os.path.join(data_out_dir, "quantum_weights", "w_dr.npy"),
+        "coef_out_path": os.path.join(data_out_dir, "quantum_weights", "w_out.npy"),
+
+        "qkan_noisy_path": os.path.join(data_out_dir, "quantum_weights", "qkan_noisy.pth"),
+        "qkan_ideal_path": os.path.join(data_out_dir, "quantum_weights", "qkan_ideal.pth"),
+        "qkan_shots_path": os.path.join(data_out_dir, "quantum_weights", "qkan_shots.pth"),
+
         # -----------------------------
         # --- Classic KAN ----
         # -----------------------------
@@ -190,6 +239,18 @@ def get_config(task, seed):
         "finetune_epochs": 15,
         "finetune_batch_size": 512,
         "finetune_patience": 5,
-        "finetune_early_stop_delta": 1e-6
+        "finetune_early_stop_delta": 1e-6,
+
+        # ---------------------
+        # QKAN Hiperparameters
+        # ---------------------
+        "qkan_batch_size": 128,
+        "qkan_learning_rate": 5e-3,
+        "qkan_epochs": 50,
+        "qkan_patience": 8,
+        "qkan_early_stop_delta": 1e-3,
+
+        "n_train_samples_for_epoch": 1000,
+        "n_val_samples": 2000,
     }
     return CONFIG
