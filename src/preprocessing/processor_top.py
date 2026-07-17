@@ -59,6 +59,7 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     gc.collect()
 
     # Global kinematic filter for the Jet (Invariant Mass > 10 GeV)
+    #mass_mask = (invariant_mass > 95.0) & (invariant_mass < 176.0)
     mass_mask = invariant_mass > 10.0
     invariant_mass = invariant_mass[mass_mask]
     raw_matrix = raw_matrix[mass_mask]
@@ -66,7 +67,7 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     phi_jet = phi_jet[mass_mask]
     
     # Extract the raw global multiplicity before truncating the matrix
-    multiplicity = np.sum(raw_matrix[:, 0:800:4] > 1e-8, axis=1)
+    multiplicity = np.sum(raw_matrix[:, 0:800:4] > 1e-3, axis=1)
     n_events = raw_matrix.shape[0]
 
     # Controlled reduction to the optimal window of 100 particles to save RAM
@@ -81,7 +82,7 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     # STEP 1 AND 2: GHOST IDENTIFICATION AND GEOMETRIC CLONING
     # -------------------------------------------------------------------------
     pt_block = np.sqrt(px_block**2 + py_block**2)
-    is_real = pt_block >= 1e-8
+    is_real = pt_block >= 1e-3
 
     # Controlled initialization along the jet axis to mitigate artificial teleportation
     eta_i = np.repeat(eta_jet[:, None], n_initial_particles, axis=1)
@@ -284,9 +285,9 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
         with h5py.File(file_path, "r") as f:
             # Reconstruct structured event tables
             f = f["table"]["table"] # Navigate to the nested group containing the data
-            raw_matrix = f["values_block_0"][:]
+            raw_matrix = f["values_block_0"][:]#[:20000]
             # Index 1 holds the categorical value (1: Top Signal, 0: QCD Background)
-            raw_labels = f["values_block_1"][:, 1] 
+            raw_labels = f["values_block_1"][:]#[:20000, 1]
 
         print(f"Data chunk successfully mounted in RAM. Extracted shape: {raw_matrix.shape}")
         
