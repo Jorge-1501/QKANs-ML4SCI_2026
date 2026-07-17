@@ -219,7 +219,7 @@ def train_kan_model(width, grid, k, learning_rate, num_epochs, batch_size,
         or (val_loss < best_val_loss - early_stop_min_delta)):
             best_val_auc = val_auc
             best_val_loss = val_loss
-            #epochs_no_improve = 0
+            epochs_no_improve = 0
             model.saveckpt(model_save_path)
 
             training_time_seconds = time.time() - start_time
@@ -241,8 +241,8 @@ def train_kan_model(width, grid, k, learning_rate, num_epochs, batch_size,
             except Exception as e:
                 print(f"Warning: Could not save metadata to JSON file. Error: {e}")
             print(f"Epoch [{epoch+1}/{num_epochs}] - Model checkpoint saved (val_auc: {best_val_auc:.5f} - val_loss: {val_loss:.5f}).")    
-        #else:
-            #epochs_no_improve += 1
+        else:
+            epochs_no_improve += 1
 
         # Early stop based on loss improvement
         if val_loss < best_val_loss - early_stop_min_delta:
