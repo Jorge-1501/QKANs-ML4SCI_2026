@@ -27,9 +27,4 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
-pykan = { workspace = true, editable = true }
-
-[tool.uv.workspace]
-members = [
-    "libs/pykan",
-]
+pykan = { git = "https://github.com/kindxiaoming/pykan.git" }
