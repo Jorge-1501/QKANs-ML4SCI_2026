@@ -59,8 +59,8 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     gc.collect()
 
     # Global kinematic filter for the Jet (Invariant Mass > 10 GeV)
-    #mass_mask = (invariant_mass > 95.0) & (invariant_mass < 176.0)
-    mass_mask = invariant_mass > 10.0
+    mass_mask = (invariant_mass > 95.0) & (invariant_mass < 176.0)
+    #mass_mask = invariant_mass > 10.0
     invariant_mass = invariant_mass[mass_mask]
     raw_matrix = raw_matrix[mass_mask]
     eta_jet = eta_jet[mass_mask]
@@ -285,9 +285,9 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
         with h5py.File(file_path, "r") as f:
             # Reconstruct structured event tables
             f = f["table"]["table"] # Navigate to the nested group containing the data
-            raw_matrix = f["values_block_0"][:]#[:20000]
+            raw_matrix = f["values_block_0"][:50000]
             # Index 1 holds the categorical value (1: Top Signal, 0: QCD Background)
-            raw_labels = f["values_block_1"][:]#[:20000, 1]
+            raw_labels = f["values_block_1"][:50000, 1]
 
         print(f"Data chunk successfully mounted in RAM. Extracted shape: {raw_matrix.shape}")
         
