@@ -1,16 +1,16 @@
 # Quantum Sinusoidal-Kolmogorov-Arnold-Networks-for-High-Energy-Physics
-The purpose of the repository is write the code develop for the project QKAN for GSoC at ML4SCI in 2026
+The purpose of the repository is to write the code developed for the project QKAN for GSoC at ML4SCI in 2026
 
 ---
 
-## Enviroment
-Follow the next comand to install. 
+## Environment
+Follow the next command to install.
 
 ```bash
 pip install uv
 ```
 
-Create the virtual enviroment
+Create the virtual environment
 ```bash
 uv sync
 ```
@@ -22,15 +22,19 @@ uv sync
 The current file includes
 * notebooks: dir with initial exploration
 * src: dir with the code for the project, including data processing, model training and evaluation.
-* data: dir where the datasets are stored, including raw and processed data.
-* outputs: dir where the results of the project are stored, including trained models, evaluation metrics, and plots.
 * scripts: dir with utility scripts for data downloading, preprocessing, and other tasks.
 * README.md: this file, which provides an overview of the project, instructions for setup and usage, and other relevant information.
 
+**Main files:**
+* `src/architectures/hep_kan.py`: Contains the implementation of the HEP-KAN model architecture, based on the Kolmogorov-Arnold representation, with methods with some modifications for the specific use case of high-energy physics data.
+* `scripts/train_kan.py`: Script for training the HEP-KAN model, including data loading, model initialization, training loop, evaluation, and saving of results.
+* `src/architectures/classic_kan.py`: Contains the base KAN model implementation, which is extended by the HEP-KAN model.
+
+The file `src/architectures/hep_kan.py` is the core of the model implementation, while `scripts/train_kan.py` is the main entry point for training the model on the provided datasets.
 ---
 
 ## Download datasets
-To improv the time of download we use aria2. We also need unzip to Higgs file.
+To improve the time of download we use aria2. We also need unzip to extract the Higgs file.
 
 Before running the download script, ensure you have `aria2` and `unzip` installed on your WSL/Linux environment. 
 
