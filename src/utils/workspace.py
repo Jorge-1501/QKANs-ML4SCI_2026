@@ -203,21 +203,22 @@ def get_config(task, seed):
         "num_workers": 0,
 
         # --- Base Training Hyperparameters ---
-        "base_lr": 1e-3,
-        "base_epochs": 50,
+        "base_lr": 5e-3,
+        "base_epochs": 60,
         "base_batch_size": 4096,
         "base_patience": 7,
-        "base_early_stop_delta": 5e-3,
+        "base_early_stop_delta": 1e-2,
         "base_lamb": 0.01, # Regularization weight
         "base_lamb_l1": 0.1,
-        "base_lamb_entropy": 0.2,
+        "base_lamb_entropy": 0.5,
         "base_lamb_coef": 0.005,     
         "base_lamb_coefdiff": 0.01,
-        "base_update_grid_freq": 50,
+        "base_update_grid_freq": 60,
 
         # --- Pruning Hyperparameters ---
-        "prune_node_th": 1e-2,
-        "prune_edge_th": 3e-2,
+        "prune_input_th": 1e-2,
+        "prune_node_th": 4e-2,
+        "prune_edge_th": 6e-2,
 
         # --- Re-training Hyperparameters ---
         "retrain_lr": 1e-3,
@@ -231,11 +232,11 @@ def get_config(task, seed):
         "retrain_lamb_coefdiff": 0.01,
 
         # --- Simplification (Fitting) Hyperparameters ---
-        "symbolic_r2_threshold": 0.8,
+        "symbolic_r2_threshold": 0.85,
         "symbolic_weight_simple": 0.5,
 
         # --- Fine-Tuning Hyperparameters ---
-        "finetune_lr": 5e-5, # Lower learning rate
+        "finetune_lr": 1e-5, # Lower learning rate
         "finetune_epochs": 15,
         "finetune_batch_size": 512,
         "finetune_patience": 5,
