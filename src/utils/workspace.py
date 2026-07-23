@@ -216,6 +216,7 @@ def get_config(task, seed):
         "base_update_grid_freq": 60,
 
         # --- Pruning Hyperparameters ---
+        "prune_input_th": 1e-2,
         "prune_node_th": 4e-2,
         "prune_edge_th": 6e-2,
 
@@ -231,8 +232,8 @@ def get_config(task, seed):
         "retrain_lamb_coefdiff": 0.01,
 
         # --- Simplification (Fitting) Hyperparameters ---
-        "symbolic_r2_threshold": 0.9,
-        "symbolic_weight_simple": 0.55,
+        "symbolic_r2_threshold": 0.85,
+        "symbolic_weight_simple": 0.5,
 
         # --- Fine-Tuning Hyperparameters ---
         "finetune_lr": 1e-5, # Lower learning rate

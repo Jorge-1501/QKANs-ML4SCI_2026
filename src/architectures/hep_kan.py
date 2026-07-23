@@ -1,11 +1,14 @@
 # src/architectures/hep_kan.py
 import torch
+import copy
 import inspect
 import matplotlib.pyplot as plt
 import sympy
 from kan import KAN
 import os
+import yaml
 import numpy as np
+import gc
 
 class HEPKAN(KAN):
     def __init__(self, *args, **kwargs):
@@ -14,6 +17,74 @@ class HEPKAN(KAN):
         Maintains all original functionality but allows method overrides.
         """
         super().__init__(*args, **kwargs)
+
+    def prune_input(self, threshold=1e-2, active_inputs=None, log_history=True):
+        """
+        Override de MultKAN.prune_input.
+
+        Method to prune the input layer of the model based on a threshold. 
+        If active_inputs is provided, it will use those inputs instead of 
+        calculating them based on the threshold.
+
+        Note: This method is a workaround for a bug in the original pykan library.
+        Bug: The bug is that when reconstructing the sub-model, MultKAN.prune_input 
+        passes `base_fun=self.base_fun` (the already instantiated module, e.g., nn.SiLU())
+        instead of `base_fun=self.base_fun_name` (the string 'silu'). Since 
+        `nn.SiLU() == 'silu'` is False, the new model ends up with 
+        `base_fun_name` pointing to a nn.Module object instead of a 
+        string, which breaks YAML serialization in saveckpt (errors 
+        related to "handling silu") and causes input pruning not to 
+        survive saving/loading.
+
+        This version is identical to the original except for using
+        `self.base_fun_name` when reconstructing the model, just like 
+        `prune()`/`prune_node()` already do correctly.
+
+        args:
+            - threshold: float
+                The threshold for pruning. Inputs with scores below 
+                this value will be pruned.
+            - active_inputs: list or None
+                If provided, this list of input indices will be used 
+                instead of calculating them based on the threshold.
+            - log_history: bool
+                If True, logs the pruning operation in the model's history.
+        returns:
+            - model: HEPKAN
+                A new HEPKAN model with the pruned input layer.
+        """
+        if active_inputs is None:
+            self.attribute()
+            input_score = self.node_scores[0]
+            input_mask = input_score > threshold
+            print('keep:', input_mask.tolist())
+            input_id = torch.where(input_mask == True)[0]
+        else:
+            input_id = torch.tensor(active_inputs, dtype=torch.long).to(self.device)
+
+        model2 = HEPKAN(
+            copy.deepcopy(self.width), grid=self.grid, k=self.k,
+            base_fun=self.base_fun_name,  # <-- FIX: string, no el módulo
+            mult_arity=self.mult_arity, ckpt_path=self.ckpt_path,
+            auto_save=True, first_init=False, state_id=self.state_id,
+            round=self.round
+        ).to(self.device)
+        model2.load_state_dict(self.state_dict())
+
+        model2.act_fun[0] = model2.act_fun[0].get_subset(input_id, torch.arange(self.width_out[1]))
+        model2.symbolic_fun[0] = self.symbolic_fun[0].get_subset(input_id, torch.arange(self.width_out[1]))
+
+        model2.cache_data = self.cache_data
+        model2.acts = None
+
+        model2.width[0] = [len(input_id), 0]
+        model2.input_id = input_id
+
+        if log_history:
+            self.log_history('prune_input')
+            model2.state_id += 1
+
+        return model2
 
     def log_history(self, method_name):
         """
@@ -133,7 +204,7 @@ class HEPKAN(KAN):
                         plt.scatter(self.acts[l][:, i][rank].cpu().detach().numpy(), self.spline_postacts[l][:, j, i][rank].cpu().detach().numpy(), color=color, s=400 * scale ** 2)
                     plt.gca().spines[:].set_color(color)
 
-                    plt.savefig(f'{folder}/sp_{l}_{i}_{j}.png', bbox_inches="tight", dpi=400)
+                    plt.savefig(f'{folder}/sp_{l}_{i}_{j}.png', bbox_inches="tight", dpi=150)
                     plt.close()
 
         def score2alpha(score):
@@ -328,11 +399,9 @@ class HEPKAN(KAN):
         get symbolic formula
 
         Args:
-        -----
-            var : None or a list of sympy expression
-                input variables
-            normalizer : [mean, std]
-            output_normalizer : [mean, std]
+            - var: None or a list of sympy expression input variables
+            - normalizer: [mean, std]
+            - output_normalizer: [mean, std]
             
         Returns:
         --------
@@ -448,3 +517,47 @@ class HEPKAN(KAN):
             return [symbolic_acts[-1][i] for i in range(len(symbolic_acts[-1]))], x0
         else:
             return [symbolic_acts[-1][i] for i in range(len(symbolic_acts[-1]))], x0
+
+    def saveckpt(self, path='model'):
+        """
+        Save the model's configuration, state, and cache data to files.
+        
+        This method ensures that the model's base function name is stored 
+        as a string, which is necessary for proper serialization and deserialization.
+        """
+        model = self
+        
+        # Forzar que el atributo interno vuelva a ser un string si es un módulo de PyTorch
+        if hasattr(model, 'base_fun_name') and not isinstance(model.base_fun_name, str):
+            model.base_fun_name = 'silu'# # Valor predeterminado seguro para tu arquitectura
+            
+        dic = dict(
+            width = model.width,
+            grid = model.grid,
+            k = model.k,
+            mult_arity = model.mult_arity,
+            base_fun_name = model.base_fun_name,
+            symbolic_enabled = model.symbolic_enabled,
+            affine_trainable = model.affine_trainable,
+            grid_eps = model.grid_eps,
+            grid_range = model.grid_range,
+            sp_trainable = model.sp_trainable,
+            sb_trainable = model.sb_trainable,
+            state_id = model.state_id,
+            auto_save = model.auto_save,
+            ckpt_path = model.ckpt_path,
+            round = model.round,
+            device = str(model.device)
+        )
+        
+        if dic["device"].isdigit():
+            dic["device"] = int(model.device)
+
+        for i in range (model.depth):
+            dic[f'symbolic.funs_name.{i}'] = model.symbolic_fun[i].funs_name
+
+        with open(f'{path}_config.yml', 'w') as outfile:
+            yaml.dump(dic, outfile, default_flow_style=False)
+
+        torch.save(model.state_dict(), f'{path}_state')
+        torch.save(model.cache_data, f'{path}_cache_data')

@@ -367,3 +367,27 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
         processed_data['X_test_tensor'], processed_data['y_test_tensor'],
         processed_data['X_train_sample'], scaler
     )
+
+def load_quantum_inputs(metadata_path, X_tensor):
+    """
+    Lee los índices de características sobrevivientes del modelo clásico podado
+    y filtra el tensor de datos para la arquitectura cuántica.
+    """
+    import json
+    import torch
+    
+    with open(metadata_path, "r") as f:
+        metadata = json.load(f)
+        
+    active_indices = metadata.get('active_input_indices', [])
+    
+    if not active_indices:
+        raise ValueError("No se encontraron índices activos en los metadatos.")
+        
+    print(f"Filtrando dataset cuántico. Dimensiones originales: {X_tensor.shape[1]}")
+    
+    # Rebanar el tensor conservando solo las columnas de los índices activos
+    X_quantum = X_tensor[:, active_indices]
+    
+    print(f"Nuevas dimensiones para QKAN: {X_quantum.shape[1]}")
+    return X_quantum

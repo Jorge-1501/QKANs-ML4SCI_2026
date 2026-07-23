@@ -1,5 +1,4 @@
 # src/architectures/quantum_kan.py
-
 import os
 import time
 import json
@@ -9,91 +8,74 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import roc_auc_score
-
-import sys
 from pathlib import Path
+import sys
+
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from src.architectures.qkan_model import QKANModel
 
 class QuantumKANTrainer:
     def __init__(self, config, train_backend="ideal"):
-        """
-        """
         self.config = config
         self.train_backend = train_backend
-        
-        # Set threads for PyTorch to avoid oversubscription in multi-threaded environments
         torch.set_num_threads(4)
         
-        # Initialize the quantum model with Chebyshev Warm-Start
-        self.model = QKANModel(init_weights_path=self.config["init_weights"])
+        # Instanciar el modelo apuntando al archivo unificado .pt
+        weights_path = os.path.join(self.config["polynomial_weights_dir"], "quantum_weights.pt")
+        self.model = QKANModel(metadata_path=weights_path, backend_mode=train_backend)
         
         self.criterion = nn.BCEWithLogitsLoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.config["qkan_learning_rate"])
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.get("qkan_learning_rate", 5e-3))
         self.lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', factor=0.5, patience=6, threshold=1e-3
         )
-        
-        # Dynamic definition of paths according to the assigned quantum backend
         self._setup_backend_paths()
 
     def _setup_backend_paths(self):
-        """Assign the correct paths from the CONFIG dictionary according to the backend."""
         if self.train_backend == "noisy":
             self.save_path = self.config["qkan_noisy_path"]
             self.history_path = self.config["history_noisy_loss"]
-        elif self.train_backend == "ideal":
-            self.save_path = self.config["qkan_ideal_path"]
-            self.history_path = self.config["history_ideal_loss"]
         elif self.train_backend == "shots":
             self.save_path = self.config["qkan_shots_path"]
             self.history_path = self.config["history_shots_loss"]
+        else:
+            self.save_path = self.config["qkan_ideal_path"]
+            self.history_path = self.config["history_ideal_loss"]
 
     def fit(self, X_train, y_train, X_val, y_val, resume=True, force=False):
-        """
-        Runs the quantum training loop with fault tolerance per backend.
-        Manages reproducible subsampling per epoch for HEP.
-        """
-        # Check if a checkpoint exists and handle resuming or forcing a new training session
         if os.path.exists(self.save_path) and resume and not force:
-            print(f"\n[Q-Trainer] Quantum model ({self.train_backend}) detected at '{self.save_path}'. Loading...")
+            print(f"\n[Q-Trainer] Modelo cuántico ({self.train_backend}) encontrado en '{self.save_path}'. Cargando...")
             self.model.load_state_dict(torch.load(self.save_path))
             if os.path.exists(self.history_path):
-                with open(self.history_path, 'r') as f: return json.load(f)
+                with open(self.history_path, 'r') as f: 
+                    return json.load(f)
             return {"train_loss": [], "val_loss": [], "val_auc": []}
 
-        print(f"\n[Q-Trainer] Starting quantum fine-tuning in mode: {self.train_backend}")
+        print(f"\n[Q-Trainer] Iniciando Fine-Tuning Cuántico. Backend: {self.train_backend}")
         
-        # Fixed subsampling for consistent validation
-        n_val = self.config["n_val_samples"]
+        n_val = self.config.get("n_val_samples", 1000)
         val_indices = torch.randperm(len(X_val))[:n_val]
         X_val_sub, y_val_sub = X_val[val_indices], y_val[val_indices]
         
         val_loader = torch.utils.data.DataLoader(
             torch.utils.data.TensorDataset(X_val_sub, y_val_sub), 
-            batch_size=self.config["qkan_batch_size"], shuffle=False
+            batch_size=self.config.get("qkan_batch_size", 64), shuffle=False
         )
 
         best_val_auc = 0.0
         best_val_loss = float('inf')
         patience_counter = 0
         history = {"train_loss": [], "val_loss": [], "val_auc": []}
-        
-        starting_time = time.time()
 
-        for epoch in range(self.config["qkan_epochs"]):
-            epoch_start = time.time()
-            
-            # Dynamic and reproducible subsampling per epoch for HEP
-            sampling_gen = torch.Generator().manual_seed(self.config["seed"] + 2 * epoch)
-            train_indices = torch.randperm(len(X_train), generator=sampling_gen)[:self.config["n_train_samples_for_epoch"]]
+        for epoch in range(self.config.get("qkan_epochs", 20)):
+            sampling_gen = torch.Generator().manual_seed(self.config["seed"] + epoch)
+            train_indices = torch.randperm(len(X_train), generator=sampling_gen)[:self.config.get("n_train_samples_for_epoch", 500)]
             
             train_loader = torch.utils.data.DataLoader(
                 torch.utils.data.TensorDataset(X_train[train_indices], y_train[train_indices]),
-                batch_size=self.config["qkan_batch_size"], shuffle=True
+                batch_size=self.config.get("qkan_batch_size", 64), shuffle=True
             )
 
-            # --- Quantum training (Train) ---
             self.model.train()
             train_loss = 0.0
             for batch_X, batch_y in train_loader:
@@ -108,9 +90,8 @@ class QuantumKANTrainer:
                 self.optimizer.step()
                 train_loss += loss.item() * batch_X.size(0)
                 
-            train_loss /= self.config["n_train_samples_for_epoch"]
+            train_loss /= len(train_indices)
 
-            # --- Quantum evaluation (Validation) ---
             self.model.eval()
             val_loss = 0.0
             all_val_probs, all_val_true = [], []
@@ -121,8 +102,8 @@ class QuantumKANTrainer:
                     loss_val = self.criterion(outputs_val.squeeze(), batch_y_val.squeeze())
                     val_loss += loss_val.item() * batch_X_val.size(0)
                     
-                    all_val_probs.extend(torch.sigmoid(outputs_val).numpy())
-                    all_val_true.extend(batch_y_val.numpy())
+                    all_val_probs.extend(torch.sigmoid(outputs_val).cpu().numpy())
+                    all_val_true.extend(batch_y_val.cpu().numpy())
                     
             val_loss /= n_val
             val_auc = 0.5 if np.isnan(all_val_probs).any() else roc_auc_score(all_val_true, all_val_probs)
@@ -133,25 +114,128 @@ class QuantumKANTrainer:
 
             self.lr_scheduler.step(val_loss)
             
-            if (epoch + 1) % 5 == 0 or epoch == 0:
-                print(f"Epoch [{epoch+1}/{self.config['qkan_epochs']}] | Loss Train: {train_loss:.4f} | Loss Val: {val_loss:.4f} | AUC Val: {val_auc:.4f}")
+            print(f"Epoch [{epoch+1}/{self.config.get('qkan_epochs')}] | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val AUC: {val_auc:.4f}")
 
-            # Checkpointing based on quantum AUC
-            if val_auc > best_val_auc + self.config["qkan_early_stop_delta"]:
+            if val_auc > best_val_auc + self.config.get("qkan_early_stop_delta", 1e-3):
                 best_val_auc = val_auc
+                os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
                 torch.save(copy.deepcopy(self.model.state_dict()), self.save_path)
-                print(f" -> Saved best quantum model (AUC: {best_val_auc:.4f})")
+                print(f" -> Guardado mejor modelo cuántico (AUC: {best_val_auc:.4f})")
 
-            # Early stopping based on loss
-            if val_loss < best_val_loss - self.config["qkan_early_stop_delta"]:
+            if val_loss < best_val_loss - self.config.get("qkan_early_stop_delta", 1e-3):
                 best_val_loss = val_loss
                 patience_counter = 0
             else:
                 patience_counter += 1
-                if patience_counter >= self.config["qkan_patience"]:
-                    print(f" Early Stopping Quantum activated at epoch {epoch+1}.")
+                if patience_counter >= self.config.get("qkan_patience", 5):
+                    print(f" Early Stopping Cuántico activado en época {epoch+1}.")
                     break
 
-        # Save metadata and history at the end of the actual training
-        with open(self.history_path, 'w') as f: json.dump(history, f)
+        os.makedirs(os.path.dirname(self.history_path), exist_ok=True)
+        with open(self.history_path, 'w') as f: 
+            json.dump(history, f, indent=4)
         return history
+
+    def evaluate(self, X_test, y_test, eval_backend="noisy"):
+        """
+        Evalúa el modelo cuántico en el conjunto de prueba.
+        Permite cambiar el backend de simulación específicamente para la evaluación.
+        """
+        print(f"\n" + "="*50)
+        print(f"[Q-Trainer] Evaluando QKAN en el test set. Backend: '{eval_backend}'")
+        print(f"="*50 + "\n")
+
+        # 1. Cambiar dinámicamente el backend si es distinto al de entrenamiento
+        if self.model.backend_mode != eval_backend:
+            print(f"[Q-Trainer] Cambiando backend del circuito a {eval_backend} para evaluación...")
+            self.model.backend_mode = eval_backend
+            self.model.dev = self.model._initialize_device()
+            import pennylane as qml
+            self.model.qnode = qml.QNode(self.model._circuit, self.model.dev, interface="torch")
+
+        self.model.eval()
+
+        # 2. Evaluación por lotes
+        batch_size = self.config.get("qkan_batch_size", 64)
+        test_loader = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(X_test, y_test), 
+            batch_size=batch_size, shuffle=False
+        )
+
+        test_loss = 0.0
+        all_probs = []
+        all_true = []
+        start_time = time.time()
+
+        with torch.no_grad():
+            for batch_X, batch_y in test_loader:
+                outputs = self.model(batch_X)
+                loss = self.criterion(outputs.squeeze(), batch_y.squeeze())
+                test_loss += loss.item() * batch_X.size(0)
+                
+                probs = torch.sigmoid(outputs).cpu().numpy()
+                all_probs.extend(probs)
+                all_true.extend(batch_y.cpu().numpy())
+
+        eval_time = time.time() - start_time
+        test_loss /= len(X_test)
+
+        # 3. Cálculo de métricas
+        import numpy as np
+        from sklearn.metrics import roc_auc_score, accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
+        
+        test_true = np.array(all_true)
+        test_probs = np.array(all_probs)
+        test_preds_binary = (test_probs > 0.5).astype(int)
+
+        test_acc = accuracy_score(test_true, test_preds_binary)
+        test_f1 = f1_score(test_true, test_preds_binary)
+        test_auc = roc_auc_score(test_true, test_probs)
+        test_precision = precision_score(test_true, test_preds_binary)
+        test_recall = recall_score(test_true, test_preds_binary)
+        cm = confusion_matrix(test_true, test_preds_binary)
+
+        print("\n" + "="*40)
+        print(f"RESULTADOS FINALES QKAN ({eval_backend})")
+        print(f"Tiempo de evaluación: {eval_time:.2f} s")
+        print(f"Test AUC: {test_auc:.4f} | Accuracy: {test_acc:.4f} | F1: {test_f1:.4f}")
+        print(f"Test Loss: {test_loss:.4f}")
+        print("\nMatriz de Confusión:\n", cm)
+        print("="*40)
+
+        # 4. Enrutamiento dinámico de guardado de artefactos
+        import src.utils.metrics as viz
+        if eval_backend == "noisy":
+            viz.plot_roc_curve(test_true, test_probs, save_path=self.config['roc_qkan_noisy'])
+            viz.plot_confusion_matrix(cm, save_path=self.config['cm_qkan_noisy'])
+            viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config['pr_qkan_noisy'])
+            metrics_path = self.config['metrics_qkan_noisy']
+        elif eval_backend == "shots":
+            viz.plot_roc_curve(test_true, test_probs, save_path=self.config['roc_qkan_shots'])
+            viz.plot_confusion_matrix(cm, save_path=self.config['cm_qkan_shots'])
+            viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config['pr_qkan_shots'])
+            metrics_path = self.config['metrics_qkan_shots']
+        else:
+            viz.plot_roc_curve(test_true, test_probs, save_path=self.config['roc_qkan_ideal'])
+            viz.plot_confusion_matrix(cm, save_path=self.config['cm_qkan_ideal'])
+            viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config['pr_qkan_ideal'])
+            metrics_path = self.config['metrics_qkan_ideal']
+
+        metrics_dic = {
+            "Backend": eval_backend,
+            "Eval Time (s)": eval_time,
+            "Test AUC": test_auc,
+            "Test Accuracy": test_acc,
+            "Test F1 Score": test_f1,
+            "Test Precision": test_precision,
+            "Test Recall": test_recall,
+            "Test Loss": test_loss,
+            "Confusion Matrix": cm.tolist()
+        }
+
+        import os, json
+        os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+        with open(metrics_path, 'w') as f:
+            json.dump(metrics_dic, f, indent=4)
+
+        return metrics_dic

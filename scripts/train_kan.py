@@ -58,6 +58,7 @@ def main(args):
         seed=args.seed,
         force_process=False
     )
+
     del top_path
     gc.collect()
 
@@ -120,21 +121,21 @@ def main(args):
         with open(CONFIG["base_eval_metrics"], 'w') as f:
             json.dump(metrics_base, f, indent=4)
 
-        print("\n--- Plotting Base Model Splines ---")
-        model_base.plot(
-            folder=CONFIG["base_model_plot_folder"],
-            save_path=CONFIG["base_model_plot_save_path"],
-            beta=12.0,
-            metric="backward",
-            in_vars=CONFIG["features"],
-            scale=1.0,
-            varscale=0.5
-        )
+        #print("\n--- Plotting Base Model Splines ---")
+        #model_base.plot(
+        #    folder=CONFIG["base_model_plot_folder"],
+        #    save_path=CONFIG["base_model_plot_save_path"],
+        #    beta=12.0,
+        #    metric="backward",
+        #    in_vars=CONFIG["features"],
+        #    scale=1.0,
+        #    varscale=0.5
+        #)
 
         print("Cleaning up base model from memory...")
         clean_memory(model_base, eval_data_base, metrics_base, history_base)
 
-    # ============================================================================
+# ============================================================================
     # STEP 3: PRUNING
     # ============================================================================
     print("\n--- Step 3: Starting Pruning ---")
@@ -146,13 +147,24 @@ def main(args):
         pruned_model = trainer.load_checkpoint(pruned_model_prefix)
     else:
         pruned_model = trainer.prune_and_save_kan(
-            original_model_path=base_model_prefix,
-            pruned_model_path=pruned_model_prefix,
-            activation_data=X_sample,
+            save_path=pruned_model_prefix,
+            X_sample=X_sample,
+            input_th=CONFIG.get("prune_input_th", 1e-2), # <-- Nuevo umbral
             node_th=CONFIG["prune_node_th"],
             edge_th=CONFIG["prune_edge_th"]
         )
-        gc.collect()
+
+    # 2. Defines la ruta al archivo JSON que generó tu modelo clásico en la poda
+    metadata_path = os.path.join(CONFIG["pruned_model_path"], "02_pruned_metadata.json")
+
+    # 3. APLICAS EL FILTRO: Llamas a la función para reducir las dimensiones de los inputs
+    print("\n--- Step 2: Filtering inputs for Quantum Architecture ---")
+    X_train = processor.load_quantum_inputs(metadata_path, X_train)
+    X_val = processor.load_quantum_inputs(metadata_path, X_val)
+    X_test = processor.load_quantum_inputs(metadata_path, X_test)
+    X_sample = processor.load_quantum_inputs(metadata_path, X_sample)
+
+    gc.collect()
 
     # ============================================================================
     # STEP 4: POST-PRUNING RETRAINING

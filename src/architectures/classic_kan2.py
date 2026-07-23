@@ -247,25 +247,70 @@ class ClassicKANTrainer:
 
         return self.model, (test_true, test_preds_probs, test_preds_binary), metrics
 
-    def prune_and_save_kan(self, original_model_path, pruned_model_path, activation_data, node_th=1e-2, edge_th=3e-2):
-        """Prunes model and ensures valid ckpt_path for pykan."""
-        print(f"\n--- Starting Pruning Process ---")
-        self.load_checkpoint(original_model_path)
+    def prune_and_save_kan(self, X_sample, save_path, input_th=1e-2, node_th=1e-2, edge_th=1e-2):
+        """
+        Aplica poda de entradas seguida de poda general (nodos y aristas).
+        Extrae el ID de las variables sobrevivientes para el modelo cuántico.
+        """
+        import os
+        import json
+        print("\n" + "="*40)
+        print("Starting KAN Pruning Phase (Input + General)...")
+        print("="*40)
 
-        output_dir = os.path.dirname(pruned_model_path)
-        os.makedirs(output_dir, exist_ok=True)
-        self.model.ckpt_path = output_dir
+        # 1. Redirigir el log interno de pykan
+        self.model.ckpt_path = os.path.dirname(save_path)
 
-        self.model.get_act(activation_data.to(self.device)) 
-        pruned_kan = self.model.prune(node_th=node_th, edge_th=edge_th)
+        # 2. Generar activaciones iniciales necesarias para evaluar atribución
+        self.model.eval()
+        with torch.no_grad():
+            if isinstance(X_sample, np.ndarray):
+                X_sample = torch.tensor(X_sample, dtype=torch.float32)
+            X_sample = X_sample.to(self.device if hasattr(self, 'device') else 'cpu')
+            self.model.get_act(X_sample)
+
+        # 3. FASE 1: Poda de Entradas (Selección de Features)
+        print(f"Pruning inputs with threshold {input_th}...")
+        self.model = self.model.prune_input(threshold=input_th)
+
+        # Es necesario regenerar activaciones tras clonar la red en prune_input
+        with torch.no_grad():
+            self.model.get_act(X_sample)
+
+        # 4. FASE 2: Poda General Estándar (Nodos ocultos y aristas)
+        print(f"Pruning hidden nodes and edges with node_th={node_th}, edge_th={edge_th}...")
+        self.model = self.model.prune(node_th=node_th, edge_th=edge_th)
+
+        # 5. Extracción del registro de variables sobrevivientes
+        active_input_indices = self.model.input_id.cpu().tolist()
+        print(f"\n✅ Active input features retained: {active_input_indices}")
+        print(f"✅ New input dimension for Quantum phase: {len(active_input_indices)}")
+
+        # 6. Guardar checkpoint
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        # Parche para corregir el bug de prune_input de PyKAN
+        #self.model.base_fun_name = 'silu' if isinstance(self.model.base_fun, torch.nn.Module) else str(self.model.base_fun)
+        self.model.saveckpt(save_path)
+
+        # 7. Guardar metadatos para pasarlos a la fase cuántica
+        metadata = {
+            'num_params_pruned': sum(p.numel() for p in self.model.parameters() if p.requires_grad),
+            'active_input_indices': active_input_indices,
+            'hyperparameters': {
+                'width': self.model.width,
+                'grid': self.model.grid,
+                'k': self.model.k,
+            }
+        }
         
-        self.model = HEPKAN.__new__(HEPKAN)
-        self.model.__dict__.update(pruned_kan.__dict__)
-        self.model.ckpt_path = output_dir
-        self.model.to(self.device)
-        self.model.saveckpt(pruned_model_path)
+        try:
+            with open(f"{save_path}_metadata.json", "w") as f:
+                json.dump(metadata, f, indent=4)
+        except Exception as e:
+            print(f"Warning: Could not save pruning metadata. Error: {e}")
+
+        print(f"[ClassicKANTrainer] Modelo podado guardado exitosamente en: '{save_path}'")
         
-        print(f"New architecture after pruning: {self.model.width}")
         return self.model
 
     def retrain_pruned_kan(self, pruned_model, learning_rate, num_epochs, batch_size,
@@ -345,6 +390,7 @@ class ClassicKANTrainer:
                 epochs_no_improve = 0
 
                 os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+                #self.model.base_fun_name = 'silu' if isinstance(self.model.base_fun, torch.nn.Module) else str(self.model.base_fun)
                 self.model.saveckpt(model_save_path)
 
                 retraining_time = time.time() - start_time
@@ -492,6 +538,7 @@ class ClassicKANTrainer:
                     gc.collect()
 
         os.makedirs(os.path.dirname(symbolic_model_path), exist_ok=True)
+
         self.model.saveckpt(symbolic_model_path)
 
         simplification_time = time.time() - start_time
