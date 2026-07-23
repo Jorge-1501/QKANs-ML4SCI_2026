@@ -17,7 +17,9 @@ class SymbolicWarmStartExtractor:
         self.degree = self.config.get("chebyshev_degree", 4)
         
     def _evaluate_isolated_edges(self, model, layer_index, input_index, output_index, x_vals):
-        """Aísla el efecto de una variable de entrada sobre un nodo de salida específico."""
+        """
+        Isolates the effect of a single input variable on a specific output node.
+        """
         layer_width = model.width[layer_index]
         in_dim = layer_width[0] if isinstance(layer_width, list) else layer_width
         n = len(x_vals)
@@ -49,14 +51,14 @@ class SymbolicWarmStartExtractor:
 
     def extract_and_save(self, classic_model_path, output_weights_path, report_path):
         """
-        Extrae las funciones del KAN clásico, filtra las entradas inactivas 
-        evaluando su rango dinámico real y genera el archivo de pesos cuánticos.
+        Extracts the functions from the classical KAN, filters inactive inputs
+        by evaluating their actual dynamic range, and generates the quantum weights file.
         """
         print("\n" + "="*40)
-        print("[Extractor] Iniciando Extracción Dinámica y Filtrado por Rango Dinámico")
+        print("[Extractor] Starting Dynamic Extraction and Filtering by Dynamic Range")
         print("="*40)
 
-        # 1. Cargar el modelo clásico entrenado
+        # 1. Load the trained classical model
         base_kan = HEPKAN.loadckpt(classic_model_path)
         model = HEPKAN.__new__(HEPKAN)
         model.__dict__.update(base_kan.__dict__)
@@ -68,29 +70,29 @@ class SymbolicWarmStartExtractor:
         x_vals = np.linspace(-1, 1, 500)
         variance_threshold = 1e-3  # Umbral mínimo de variación ($\Delta y$) para considerar una variable activa
 
-        print("[Extractor] Evaluando relevancia física de cada variable de entrada...")
+        print("[Extractor] Evaluating the physical relevance of each input variable...")
         for i in range(in_dim):
             # Comprobación de máscara dura de PyTorch
             mask_act = model.act_fun[0].mask[i, :].sum().item()
             mask_sym = model.symbolic_fun[0].mask[:, i].sum().item() if hasattr(model, "symbolic_fun") else 0.0
 
             if mask_act == 0.0 and mask_sym == 0.0:
-                print(f" -> Variable {i}: OMITIDA (Máscara en 0.0 absoluto)")
+                print(f" -> Variable {i}: OMITTED (Mask at absolute 0.0)")
                 continue
 
-            # Comprobación por Rango Dinámico ($\Delta y = \max(y) - \min(y)$)
+            # Check by Dynamic Range ($\Delta y = \max(y) - \min(y)$)
             y_eval = self._evaluate_isolated_edges(model, layer_index=0, input_index=i, output_index=0, x_vals=x_vals)
             dynamic_range = float(np.max(y_eval) - np.min(y_eval))
 
             if dynamic_range > variance_threshold:
                 active_inputs.append(i)
-                print(f" -> Variable {i} ACTIVA (Rango dinámico: {dynamic_range:.5f})")
+                print(f" -> Variable {i} ACTIVE (Dynamic range: {dynamic_range:.5f})")
             else:
-                print(f" -> Variable {i} DESCARTADA (Contribución insignificante: {dynamic_range:.6f})")
+                print(f" -> Variable {i} DISCARDED (Insignificant contribution: {dynamic_range:.6f})")
 
-        # Fallback de seguridad en caso de que un pruning extremo descarte todo
+        # Safety fallback in case extreme pruning discards everything
         if not active_inputs:
-            print("[Extractor] Advertencia: Ninguna variable superó el umbral. Seleccionando la de mayor impacto...")
+            print("[Extractor] Warning: No variable surpassed the threshold. Selecting the one with the highest impact...")
             ranges = [
                 float(np.max(self._evaluate_isolated_edges(model, 0, i, 0, x_vals)) - 
                       np.min(self._evaluate_isolated_edges(model, 0, i, 0, x_vals))) 
@@ -99,20 +101,20 @@ class SymbolicWarmStartExtractor:
             active_inputs = [int(np.argmax(ranges))]
 
         n_qubits = len(active_inputs)
-        print(f"\n[Extractor] Filtrado completado: {n_qubits} Qubits asignados (Entradas: {active_inputs})")
+        print(f"\n[Extractor] Filtering completed: {n_qubits} Qubits assigned (Inputs: {active_inputs})")
 
-        # 2. Extraer los coeficientes polinomiales para los qubits activos
+        # Extract polynomial coefficients for active qubits
         quantum_weights = np.zeros((n_qubits, self.degree + 1))
         for q_idx, classical_in_idx in enumerate(active_inputs):
             y_vals = self._evaluate_isolated_edges(model, layer_index=0, input_index=classical_in_idx, output_index=0, x_vals=x_vals)
             coefs = chebfit(x_vals, y_vals, deg=self.degree)
             quantum_weights[q_idx, :] = coefs
 
-        # Extracción de escala de la capa de salida
+        # Extract output layer scale
         y_out = self._evaluate_isolated_edges(model, layer_index=1, input_index=0, output_index=0, x_vals=x_vals)
         out_coefs = chebfit(x_vals, y_out, deg=1)
 
-        # 3. Exportar usando Tensores de PyTorch para evitar incompatibilidades con PyTorch 2.6+
+        # Export using PyTorch Tensors to avoid incompatibilities with PyTorch 2.6+
         os.makedirs(os.path.dirname(output_weights_path), exist_ok=True)
         export_data = {
             "active_inputs": active_inputs,
@@ -122,16 +124,16 @@ class SymbolicWarmStartExtractor:
             "out_weights": torch.tensor(out_coefs, dtype=torch.float32)
         }
         torch.save(export_data, output_weights_path)
-        print(f"[Extractor] Pesos y metadatos exportados exitosamente a: {output_weights_path}")
+        print(f"[Extractor] Weights and metadata successfully exported to: {output_weights_path}")
 
-        # Generar reporte escrito
+        # Generate written report
         os.makedirs(os.path.dirname(report_path), exist_ok=True)
         with open(report_path, "w") as f:
-            f.write("=== REPORTE DE EXTRACCIÓN DINÁMICA DE PESOS ===\n")
-            f.write(f"Qubits requeridos (n_qubits): {n_qubits}\n")
-            f.write(f"Variables activas seleccionadas: {active_inputs}\n")
-            f.write(f"Grado Polinomial (Chebyshev): {self.degree}\n\n")
+            f.write("=== DYNAMIC WEIGHTS EXTRACTION REPORT ===\n")
+            f.write(f"Required Qubits (n_qubits): {n_qubits}\n")
+            f.write(f"Selected Active Variables: {active_inputs}\n")
+            f.write(f"Polynomial Degree (Chebyshev): {self.degree}\n\n")
             for q_idx, c_idx in enumerate(active_inputs):
-                f.write(f"Wire {q_idx} (Input Clásico {c_idx}): {quantum_weights[q_idx].tolist()}\n")
+                f.write(f"Wire {q_idx} (Classical Input {c_idx}): {quantum_weights[q_idx].tolist()}\n")
 
         return export_data
