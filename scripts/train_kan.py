@@ -14,7 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent.resolve()))
 import src.utils.workspace as workspace
 import src.preprocessing.processor_top as processor
 import src.utils.metrics as viz
-from src.architectures.classic_kan2 import ClassicKANTrainer, clean_memory
+from src.architectures.classic_kan import ClassicKANTrainer, clean_memory
 
 class TeedLog:
     """Clone sys.stdout to log messages to both the console and a file."""
@@ -121,16 +121,16 @@ def main(args):
         with open(CONFIG["base_eval_metrics"], 'w') as f:
             json.dump(metrics_base, f, indent=4)
 
-        #print("\n--- Plotting Base Model Splines ---")
-        #model_base.plot(
-        #    folder=CONFIG["base_model_plot_folder"],
-        #    save_path=CONFIG["base_model_plot_save_path"],
-        #    beta=12.0,
-        #    metric="backward",
-        #    in_vars=CONFIG["features"],
-        #    scale=1.0,
-        #    varscale=0.5
-        #)
+        print("\n--- Plotting Base Model Splines ---")
+        model_base.plot(
+            folder=CONFIG["base_model_plot_folder"],
+            save_path=CONFIG["base_model_plot_save_path"],
+            beta=12.0,
+            metric="backward",
+            in_vars=CONFIG["features"],
+            scale=1.0,
+            varscale=0.5
+        )
 
         print("Cleaning up base model from memory...")
         clean_memory(model_base, eval_data_base, metrics_base, history_base)

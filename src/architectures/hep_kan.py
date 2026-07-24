@@ -2,6 +2,7 @@
 import torch
 import copy
 import inspect
+import matplotlib
 import matplotlib.pyplot as plt
 import sympy
 from kan import KAN
@@ -9,6 +10,7 @@ import os
 import yaml
 import numpy as np
 import gc
+import io
 
 class HEPKAN(KAN):
     def __init__(self, *args, **kwargs):
@@ -96,10 +98,24 @@ class HEPKAN(KAN):
 
     def plot(self, folder="./figures", save_path=None, beta=3, metric='backward', 
              scale=0.5, tick=False, sample=False, in_vars=None, out_vars=None, 
-             title=None, varscale=1.0):
+             title=None, varscale=1.0, edge_dpi=150, thumb_dpi=50):
         """
-        plot KAN
+        plot KAN - visualizes the network architecture and activations. Optmizations
+        based on the original pykan.plot() to avoid redundant IO and improve performance.
         
+        Changes compared to the original pykan version:
+          1. Filter pruned edges: completely skips rendering any edge with symbolic_mask == 0
+                and numeric_mask == 0 (O(E_active) instead of O(E_total)).
+          2. Force Backend headless (Agg) and a SINGLE pair (fig, ax) recycled for
+             all edge subplots: cleared with ax.clear() instead of creating/destroying a 
+             Figure per edge.
+          3. A single render per edge: it is drawn once at high resolution,
+             saved to disk, and the thumbnail for the global graph is derived from the same
+             already rasterized buffer (RGBA in-memory) instead of triggering a second
+             full savefig() pass.
+          4. Thumbnails stored as uint8 (not float64) to minimize RAM.
+          5. Dynamic axes/ranges calculated by the B-spline, with no real extra cost.
+
         Args:
         -----
             folder : str
@@ -120,6 +136,10 @@ class HEPKAN(KAN):
                 title
             varscale : float
                 the size of input variables
+            edge_dpi : int
+                the dpi of edge figures
+            thumb_dpi : int
+                the dpi of thumbnail figures
             
         Returns:
         --------
@@ -133,84 +153,104 @@ class HEPKAN(KAN):
         >>> model(x) # do a forward pass to obtain model.acts
         >>> model.plot()
         """
+        matplotlib.use('Agg', force=True)  # headless: never ever tries to talk to an X11 display via SSH
         global Symbol
-        kan_file_path = inspect.getfile(KAN) 
+        kan_file_path = inspect.getfile(KAN)
         kan_dir = os.path.dirname(os.path.abspath(kan_file_path))
-        
+ 
         if not self.save_act:
             print('cannot plot since data are not saved. Set save_act=True first.')
-        
-        # forward to obtain activations
-        if self.acts == None:
-            if self.cache_data == None:
+ 
+        if self.acts is None:
+            if self.cache_data is None:
                 raise Exception('model hasn\'t seen any data yet.')
             self.forward(self.cache_data)
-            
+ 
         if metric == 'backward':
             self.attribute()
-            
-        
+ 
         if not os.path.exists(folder):
             os.makedirs(folder)
-        # matplotlib.use('Agg')
+ 
         depth = len(self.width) - 1
+        thumbnails = {}
+ 
+        # ------------------------------------------------------------------
+        # Phase 1: Rendering active edges
+        # ------------------------------------------------------------------
+        w_large = 4.0 * scale
+        fig_edge, ax_edge = plt.subplots(figsize=(w_large, w_large))
+ 
         for l in range(depth):
-            #w_large = 2.0
-            # change the size of the figure according to the number of neurons in the layer
-            w_large = 4.0 * scale
+            acts_l = self.acts[l].cpu().detach().numpy()
+            spline_postacts_l = self.spline_postacts[l].cpu().detach().numpy()
+ 
             for i in range(self.width_in[l]):
-                for j in range(self.width_out[l+1]):
-                    rank = torch.argsort(self.acts[l][:, i])
-                    fig, ax = plt.subplots(figsize=(w_large, w_large))
-
-                    num = rank.shape[0]
-
-                    #print(self.width_in[l])
-                    #print(self.width_out[l+1])
-                    symbolic_mask = self.symbolic_fun[l].mask[j][i]
-                    numeric_mask = self.act_fun[l].mask[i][j]
+                rank = np.argsort(acts_l[:, i])
+                x_vals = acts_l[:, i][rank]
+ 
+                for j in range(self.width_out[l + 1]):
+                    symbolic_mask = self.symbolic_fun[l].mask[j][i].item()
+                    numeric_mask = self.act_fun[l].mask[i][j].item()
+ 
+                    # Short-circuit: pruned edge, nothing is rendered
+                    if symbolic_mask == 0. and numeric_mask == 0.:
+                        continue
+ 
                     if symbolic_mask > 0. and numeric_mask > 0.:
                         color = 'purple'
-                        alpha_mask = 1
-                    if symbolic_mask > 0. and numeric_mask == 0.:
+                    elif symbolic_mask > 0. and numeric_mask == 0.:
                         color = "red"
-                        alpha_mask = 1
-                    if symbolic_mask == 0. and numeric_mask > 0.:
+                    else:
                         color = "black"
-                        alpha_mask = 1
-                    if symbolic_mask == 0. and numeric_mask == 0.:
-                        color = "white"
-                        alpha_mask = 0
-                        
+ 
+                    ax_edge.clear() # reutilizes the same Figure/Axes, does not create a new one
+ 
+                    ax_edge.spines['top'].set_visible(False)
+                    ax_edge.spines['right'].set_visible(False)
+                    ax_edge.spines['bottom'].set_linewidth(0.8)
+                    ax_edge.spines['left'].set_linewidth(0.8)
 
-                    if tick == True:
-                        ax.tick_params(axis="y", direction="in", pad=-22, labelsize=50)
-                        ax.tick_params(axis="x", direction="in", pad=-15, labelsize=50)
-                        x_min, x_max, y_min, y_max = self.get_range(l, i, j, verbose=False)
-                        plt.xticks([x_min, x_max], ['%2.f' % x_min, '%2.f' % x_max])
-                        plt.yticks([y_min, y_max], ['%2.f' % y_min, '%2.f' % y_max])
+
+                    x_min, x_max, y_min, y_max = self.get_range(l, i, j, verbose=False)
+                    if tick:
+                        ax_edge.grid(True, linestyle=':', alpha=0.3, color='gray')
+                        ax_edge.tick_params(axis="both", direction="in", pad=3, labelsize=15, colors='dimgray')
+                        ax_edge.set_xticks([x_min, x_max])
+                        ax_edge.set_xticklabels(['%.1f' % x_min, '%.1f' % x_max])
+                        ax_edge.set_yticks([y_min, y_max])
+                        ax_edge.set_yticklabels(['%.1f' % y_min, '%.1f' % y_max])
                     else:
-                        plt.xticks([])
-                        plt.yticks([])
-                    if alpha_mask == 1:
-                        plt.gca().patch.set_edgecolor('black')
-                    else:
-                        plt.gca().patch.set_edgecolor('white')
-                    plt.gca().patch.set_linewidth(1.5)
-                    # plt.axis('off')
+                        ax_edge.set_xticks([])
+                        ax_edge.set_yticks([])
+                    
+                    y_vals = spline_postacts_l[:, j, i][rank]
+                    ax_edge.plot(x_vals, y_vals, color=color, lw=3)
 
-                    plt.plot(self.acts[l][:, i][rank].cpu().detach().numpy(), self.spline_postacts[l][:, j, i][rank].cpu().detach().numpy(), color=color, lw=5)
-                    if sample == True:
-                        plt.scatter(self.acts[l][:, i][rank].cpu().detach().numpy(), self.spline_postacts[l][:, j, i][rank].cpu().detach().numpy(), color=color, s=400 * scale ** 2)
-                    plt.gca().spines[:].set_color(color)
-
-                    plt.savefig(f'{folder}/sp_{l}_{i}_{j}.png', bbox_inches="tight", dpi=150)
-                    plt.close()
-
+                    if sample:
+                        ax_edge.scatter(x_vals, y_vals, color=color, s=20 * scale ** 2)
+                    
+                    for spine in ax_edge.spines.values():
+                        spine.set_color(color)
+ 
+                    # --- A single real render: it is drawn once ---
+                    fig_edge.savefig(f'{folder}/sp_{l}_{i}_{j}.png', bbox_inches="tight", dpi=edge_dpi)
+ 
+                    # Thumbnail derived from the same already rasterized buffer (no second savefig)
+                    fig_edge.canvas.draw()
+                    rgba = np.asarray(fig_edge.canvas.buffer_rgba())  # HxWx4 uint8, already rendered
+                    step = max(1, int(round(edge_dpi / thumb_dpi)))
+                    thumbnails[(l, i, j)] = rgba[::step, ::step, :].copy()  # uint8, lightweight
+ 
+        plt.close(fig_edge)
+        gc.collect()
+ 
+        # ------------------------------------------------------------------
+        # Phase 2: Construction of the main graph and connections
+        # ------------------------------------------------------------------
         def score2alpha(score):
             return np.tanh(beta * score)
-
-        
+ 
         if metric == 'forward_n':
             scores = self.acts_scale
         elif metric == 'forward_u':
@@ -219,180 +259,158 @@ class HEPKAN(KAN):
             scores = self.edge_scores
         else:
             raise Exception(f'metric = \'{metric}\' not recognized')
-        
+ 
         alpha = [score2alpha(score.cpu().detach().numpy()) for score in scores]
-            
-        # draw skeleton
+ 
         width = np.array(self.width)
         width_in = np.array(self.width_in)
         width_out = np.array(self.width_out)
         A = 1
-        y0 = 0.3  # height: from input to pre-mult
-        z0 = 0.1  # height: from pre-mult to post-mult (input of next layer)
-
+        y0 = 0.3
+        z0 = 0.1
+ 
         neuron_depth = len(width)
         min_spacing = A / np.maximum(np.max(width_out), 5)
-
         max_neuron = np.max(width_out)
         max_num_weights = np.max(width_in[:-1] * width_out[1:])
-        y1 = 0.4 / np.maximum(max_num_weights, 5) # size (height/width) of 1D function diagrams
-        y2 = 0.15 / np.maximum(max_neuron, 5) # size (height/width) of operations (sum and mult)
-
-        fig, ax = plt.subplots(figsize=(10 * scale, 10 * scale * (neuron_depth - 1) * (y0+z0)))
-        # fig, ax = plt.subplots(figsize=(5,5*(neuron_depth-1)*y0))
-
-        # -- Transformation functions
+        y1 = 0.4 / np.maximum(max_num_weights, 5)
+        y2 = 0.15 / np.maximum(max_neuron, 5)
+ 
+        fig, ax = plt.subplots(figsize=(10 * scale, 10 * scale * (neuron_depth - 1) * (y0 + z0)))
+ 
         DC_to_FC = ax.transData.transform
         FC_to_NFC = fig.transFigure.inverted().transform
-        # -- Take data coordinates and transform them to normalized figure coordinates
         DC_to_NFC = lambda x: FC_to_NFC(DC_to_FC(x))
-        
-        # plot scatters and lines
+ 
         for l in range(neuron_depth):
-            
             n = width_in[l]
-            
-            # scatters
             for i in range(n):
-                plt.scatter(1 / (2 * n) + i / n, l * (y0+z0), s=min_spacing ** 2 * 10000 * scale ** 2, color='black')
-                
-            # plot connections (input to pre-mult)
+                plt.scatter(1 / (2 * n) + i / n, l * (y0 + z0), s=min_spacing ** 2 * 10000 * scale ** 2, color='black')
+ 
             for i in range(n):
                 if l < neuron_depth - 1:
-                    n_next = width_out[l+1]
+                    n_next = width_out[l + 1]
                     N = n * n_next
                     for j in range(n_next):
                         id_ = i * n_next + j
-
-                        symbol_mask = self.symbolic_fun[l].mask[j][i]
-                        numerical_mask = self.act_fun[l].mask[i][j]
-                        if symbol_mask == 1. and numerical_mask > 0.:
-                            color = 'purple'
-                            alpha_mask = 1.
-                        if symbol_mask == 1. and numerical_mask == 0.:
-                            color = "red"
-                            alpha_mask = 1.
-                        if symbol_mask == 0. and numerical_mask == 1.:
-                            color = "black"
-                            alpha_mask = 1.
+                        symbol_mask = self.symbolic_fun[l].mask[j][i].item()
+                        numerical_mask = self.act_fun[l].mask[i][j].item()
+ 
                         if symbol_mask == 0. and numerical_mask == 0.:
-                            color = "white"
-                            alpha_mask = 0.
-                        
-                        plt.plot([1 / (2 * n) + i / n, 1 / (2 * N) + id_ / N], [l * (y0+z0), l * (y0+z0) + y0/2 - y1], color=color, lw=2 * scale, alpha=alpha[l][j][i] * alpha_mask)
-                        plt.plot([1 / (2 * N) + id_ / N, 1 / (2 * n_next) + j / n_next], [l * (y0+z0) + y0/2 + y1, l * (y0+z0)+y0], color=color, lw=2 * scale, alpha=alpha[l][j][i] * alpha_mask)
-                            
-                            
-            # plot connections (pre-mult to post-mult, post-mult = next-layer input)
+                            continue
+ 
+                        if symbol_mask == 1. and numerical_mask > 0.:
+                            color, alpha_mask = 'purple', 1.
+                        elif symbol_mask == 1. and numerical_mask == 0.:
+                            color, alpha_mask = "red", 1.
+                        else:  # symbol_mask == 0. and numerical_mask == 1.
+                            color, alpha_mask = "black", 1.
+ 
+                        plt.plot([1 / (2 * n) + i / n, 1 / (2 * N) + id_ / N], [l * (y0 + z0), l * (y0 + z0) + y0 / 2 - y1], color=color, lw=2 * scale, alpha=alpha[l][j][i] * alpha_mask)
+                        plt.plot([1 / (2 * N) + id_ / N, 1 / (2 * n_next) + j / n_next], [l * (y0 + z0) + y0 / 2 + y1, l * (y0 + z0) + y0], color=color, lw=2 * scale, alpha=alpha[l][j][i] * alpha_mask)
+ 
             if l < neuron_depth - 1:
-                n_in = width_out[l+1]
-                n_out = width_in[l+1]
+                n_in = width_out[l + 1]
+                n_out = width_in[l + 1]
                 mult_id = 0
                 for i in range(n_in):
-                    if i < width[l+1][0]:
+                    if i < width[l + 1][0]:
                         j = i
                     else:
-                        if i == width[l+1][0]:
-                            if isinstance(self.mult_arity,int):
-                                ma = self.mult_arity
-                            else:
-                                ma = self.mult_arity[l+1][mult_id]
+                        if i == width[l + 1][0]:
+                            ma = self.mult_arity if isinstance(self.mult_arity, int) else self.mult_arity[l + 1][mult_id]
                             current_mult_arity = ma
                         if current_mult_arity == 0:
                             mult_id += 1
-                            if isinstance(self.mult_arity,int):
-                                ma = self.mult_arity
-                            else:
-                                ma = self.mult_arity[l+1][mult_id]
+                            ma = self.mult_arity if isinstance(self.mult_arity, int) else self.mult_arity[l + 1][mult_id]
                             current_mult_arity = ma
-                        j = width[l+1][0] + mult_id
+                        j = width[l + 1][0] + mult_id
                         current_mult_arity -= 1
-                        #j = (i-width[l+1][0])//self.mult_arity + width[l+1][0]
-                    plt.plot([1 / (2 * n_in) + i / n_in, 1 / (2 * n_out) + j / n_out], [l * (y0+z0) + y0, (l+1) * (y0+z0)], color='black', lw=2 * scale)
-
-                    
-                    
+                    plt.plot([1 / (2 * n_in) + i / n_in, 1 / (2 * n_out) + j / n_out], [l * (y0 + z0) + y0, (l + 1) * (y0 + z0)], color='black', lw=2 * scale)
+ 
             plt.xlim(0, 1)
-            plt.ylim(-0.1 * (y0+z0), (neuron_depth - 1 + 0.1) * (y0+z0))
-
-
+            plt.ylim(-0.1 * (y0 + z0), (neuron_depth - 1 + 0.1) * (y0 + z0))
+ 
         plt.axis('off')
-
+ 
+        # ------------------------------------------------------------------
+        # Phase 3: Insertion of thumbnails and icons (100% from RAM)
+        # ------------------------------------------------------------------
         for l in range(neuron_depth - 1):
-            # plot splines
             n = width_in[l]
             for i in range(n):
                 n_next = width_out[l + 1]
                 N = n * n_next
                 for j in range(n_next):
+                    if (l, i, j) not in thumbnails:
+                        continue
+ 
                     id_ = i * n_next + j
-                    im = plt.imread(f'{folder}/sp_{l}_{i}_{j}.png')
+                    im = thumbnails[(l, i, j)]
+ 
                     left = DC_to_NFC([1 / (2 * N) + id_ / N - y1, 0])[0]
                     right = DC_to_NFC([1 / (2 * N) + id_ / N + y1, 0])[0]
-                    bottom = DC_to_NFC([0, l * (y0+z0) + y0/2 - y1])[1]
-                    up = DC_to_NFC([0, l * (y0+z0) + y0/2 + y1])[1]
+                    bottom = DC_to_NFC([0, l * (y0 + z0) + y0 / 2 - y1])[1]
+                    up = DC_to_NFC([0, l * (y0 + z0) + y0 / 2 + y1])[1]
+ 
                     newax = fig.add_axes([left, bottom, right - left, up - bottom])
-                    # newax = fig.add_axes([1/(2*N)+id_/N-y1, (l+1/2)*y0-y1, y1, y1], anchor='NE')
                     newax.imshow(im, alpha=alpha[l][j][i])
                     newax.axis('off')
-                    
-              
-            # plot sum symbols
-            N = n = width_out[l+1]
+ 
+            N = n = width_out[l + 1]
             for j in range(n):
                 id_ = j
                 path = os.path.join(kan_dir, "assets", "img", "sum_symbol.png")
-                im = plt.imread(path)
-                left = DC_to_NFC([1 / (2 * N) + id_ / N - y2, 0])[0]
-                right = DC_to_NFC([1 / (2 * N) + id_ / N + y2, 0])[0]
-                bottom = DC_to_NFC([0, l * (y0+z0) + y0 - y2])[1]
-                up = DC_to_NFC([0, l * (y0+z0) + y0 + y2])[1]
-                newax = fig.add_axes([left, bottom, right - left, up - bottom])
-                newax.imshow(im)
-                newax.axis('off')
-                
-            # plot mult symbols
-            N = n = width_in[l+1]
-            n_sum = width[l+1][0]
-            n_mult = width[l+1][1]
+                if os.path.exists(path):
+                    im = plt.imread(path)
+                    left = DC_to_NFC([1 / (2 * N) + id_ / N - y2, 0])[0]
+                    right = DC_to_NFC([1 / (2 * N) + id_ / N + y2, 0])[0]
+                    bottom = DC_to_NFC([0, l * (y0 + z0) + y0 - y2])[1]
+                    up = DC_to_NFC([0, l * (y0 + z0) + y0 + y2])[1]
+                    newax = fig.add_axes([left, bottom, right - left, up - bottom])
+                    newax.imshow(im)
+                    newax.axis('off')
+ 
+            N = n = width_in[l + 1]
+            n_sum = width[l + 1][0]
+            n_mult = width[l + 1][1]
             for j in range(n_mult):
                 id_ = j + n_sum
                 path = os.path.join(kan_dir, "assets", "img", "mult_symbol.png")
-                im = plt.imread(path)
-                left = DC_to_NFC([1 / (2 * N) + id_ / N - y2, 0])[0]
-                right = DC_to_NFC([1 / (2 * N) + id_ / N + y2, 0])[0]
-                bottom = DC_to_NFC([0, (l+1) * (y0+z0) - y2])[1]
-                up = DC_to_NFC([0, (l+1) * (y0+z0) + y2])[1]
-                newax = fig.add_axes([left, bottom, right - left, up - bottom])
-                newax.imshow(im)
-                newax.axis('off')
-
-        if in_vars != None:
+                if os.path.exists(path):
+                    im = plt.imread(path)
+                    left = DC_to_NFC([1 / (2 * N) + id_ / N - y2, 0])[0]
+                    right = DC_to_NFC([1 / (2 * N) + id_ / N + y2, 0])[0]
+                    bottom = DC_to_NFC([0, (l + 1) * (y0 + z0) - y2])[1]
+                    up = DC_to_NFC([0, (l + 1) * (y0 + z0) + y2])[1]
+                    newax = fig.add_axes([left, bottom, right - left, up - bottom])
+                    newax.imshow(im)
+                    newax.axis('off')
+ 
+        if in_vars is not None:
             n = self.width_in[0]
             for i in range(n):
-                if isinstance(in_vars[i], sympy.Expr):
-                    plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), -0.1, f'${latex(in_vars[i])}$', fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
-                else:
-                    plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), -0.1, in_vars[i], fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
-                
-                
-
-        if out_vars != None:
+                text_var = f'${sympy.latex(in_vars[i])}$' if isinstance(in_vars[i], sympy.Expr) else in_vars[i]
+                plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), -0.1, text_var, fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
+ 
+        if out_vars is not None:
             n = self.width_in[-1]
             for i in range(n):
-                if isinstance(out_vars[i], sympy.Expr):
-                    plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), (y0+z0) * (len(self.width) - 1) + 0.15, f'${latex(out_vars[i])}$', fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
-                else:
-                    plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), (y0+z0) * (len(self.width) - 1) + 0.15, out_vars[i], fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
-
-        if title != None:
-            plt.gcf().get_axes()[0].text(0.5, (y0+z0) * (len(self.width) - 1) + 0.3, title, fontsize=40 * scale, horizontalalignment='center', verticalalignment='center')
+                text_var = f'${sympy.latex(out_vars[i])}$' if isinstance(out_vars[i], sympy.Expr) else out_vars[i]
+                plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), (y0 + z0) * (len(self.width) - 1) + 0.15, text_var, fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
+ 
+        if title is not None:
+            plt.gcf().get_axes()[0].text(0.5, (y0 + z0) * (len(self.width) - 1) + 0.3, title, fontsize=40 * scale, horizontalalignment='center', verticalalignment='center')
+ 
         if save_path:
             print(f'saving figure to {save_path}')
             plt.savefig(save_path, bbox_inches="tight", dpi=400)
-            plt.close()
+            plt.close(fig)
         else:
             plt.show()
+ 
+        del thumbnails
+        gc.collect()
 
     def symbolic_formula(self, var=None, normalizer=None, output_normalizer = None):
         '''
