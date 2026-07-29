@@ -53,14 +53,19 @@ class QuantumKANTrainer:
 
         print(f"\n[Q-Trainer] Starting Quantum Fine-Tuning. Backend: {self.train_backend}")
         
-        n_val = self.config.get("n_val_samples", 1000)
-        val_indices = torch.randperm(len(X_val))[:n_val]
+        n_val = min(self.config.get("n_val_samples", 1000), len(X_val))
+        val_gen = torch.Generator().manual_seed(self.config["seed"])
+        val_indices = torch.randperm(len(X_val), generator=val_gen)[:n_val]
         X_val_sub, y_val_sub = X_val[val_indices], y_val[val_indices]
         
         val_loader = torch.utils.data.DataLoader(
             torch.utils.data.TensorDataset(X_val_sub, y_val_sub), 
             batch_size=self.config.get("qkan_batch_size", 64), shuffle=False
         )
+
+        # early stopping and history tracking
+        patience = self.config.get("qkan_patience", 5)
+        early_stop_delta = self.config.get("qkan_early_stop_delta", 1e-3)
 
         best_val_auc = 0.0
         best_val_loss = float('inf')
@@ -114,20 +119,23 @@ class QuantumKANTrainer:
 
             self.lr_scheduler.step(val_loss)
             
-            print(f"Epoch [{epoch+1}/{self.config.get('qkan_epochs')}] | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val AUC: {val_auc:.4f}")
+            if epoch % 5 == 0:
+                print(f"Epoch [{epoch+1}/{self.config.get('qkan_epochs')}] | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val AUC: {val_auc:.4f}")
 
-            if val_auc > best_val_auc + self.config.get("qkan_early_stop_delta", 1e-3):
+            if (val_auc > best_val_auc + early_stop_delta) or\
+                (val_loss < best_val_loss - early_stop_delta):
                 best_val_auc = val_auc
                 os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
                 torch.save(copy.deepcopy(self.model.state_dict()), self.save_path)
-                print(f" -> Saving best quantum model (AUC: {best_val_auc:.4f})")
+                print(f" -> Saving quantum model at epoch {epoch+1} (Loss: {best_val_loss:.4f} - AUC: {best_val_auc:.4f})")
 
-            if val_loss < best_val_loss - self.config.get("qkan_early_stop_delta", 1e-3):
+            if (val_loss < best_val_loss - early_stop_delta) and\
+                (val_auc > best_val_auc - early_stop_delta):
                 best_val_loss = val_loss
                 patience_counter = 0
             else:
                 patience_counter += 1
-                if patience_counter >= self.config.get("qkan_patience", 5):
+                if patience_counter >= patience:
                     print(f" Early Stopping activated at epoch {epoch+1}.")
                     break
 
@@ -196,12 +204,18 @@ class QuantumKANTrainer:
         cm = confusion_matrix(test_true, test_preds_binary)
 
         print("\n" + "="*40)
-        print(f"FINAL QKAN RESULTS ({eval_backend})")
-        print(f"Evaluation time: {eval_time:.2f} s")
-        print(f"Test AUC: {test_auc:.4f} | Accuracy: {test_acc:.4f} | F1: {test_f1:.4f}")
-        print(f"Test Loss: {test_loss:.4f}")
-        print("\nConfusion Matrix:\n", cm)
-        print("="*40)
+        print("\n--- Metrics on the Test Set ---")
+        print(f"Test Loss: {test_loss:.5f}")
+        print(f"Test Accuracy: {test_acc:.5f}")
+        print(f"Test F1 Score: {test_f1:.5f}")
+        print(f"Test AUC: {test_auc:.5f}")
+        print(f"Test Precision: {test_precision:.5f}")
+        print(f"Test Recall: {test_recall:.5f}")
+
+        # Print Confusion Matrix
+        print("\nMatriz de Confusión:")
+        print(cm)
+        print("\n" + "="*40)
 
         # 4. Dynamic routing for saving artifacts
         import src.utils.metrics as viz

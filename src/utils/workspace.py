@@ -249,7 +249,7 @@ def get_config(task, seed):
         "qkan_learning_rate": 5e-3,
         "qkan_epochs": 50,
         "qkan_patience": 8,
-        "qkan_early_stop_delta": 1e-3,
+        "qkan_early_stop_delta": 5e-3,
 
         "n_train_samples_for_epoch": 1000,
         "n_val_samples": 2000,

@@ -11,11 +11,28 @@ import src.preprocessing.processor_top as processor
 from src.architectures.extractor import SymbolicWarmStartExtractor
 from src.architectures.quantum_kan import QuantumKANTrainer
 
+class TeedLog:
+    """Clone sys.stdout to log messages to both the console and a file."""
+    def __init__(self, filename):
+        self.terminal = sys.stdout
+        self.log = open(filename, "w", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message) 
+        self.log.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
 def main(args):
     # Configuration and workspace setup
     CONFIG = workspace.get_config(task=args.task, seed=args.seed)
     workspace.make_dirs(CONFIG)
     print(f"Selected backend mode (Training): {args.train_backend} \n")
+
+    log_file_path = os.path.join(CONFIG["processed_data_dir"], f"train_qkan_{args.task}.log")
+    sys.stdout = TeedLog(log_file_path)
 
     # Load classical data
     X_train, y_train, X_val, y_val, X_test, y_test, X_sample, scaler = processor.load_and_preprocess_data(

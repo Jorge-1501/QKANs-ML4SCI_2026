@@ -18,9 +18,12 @@ class QKANModel(nn.Module):
         self.n_qubits = metadata["n_qubits"]
         self.degree = metadata["degree"]
         
-        # Initialize trainable parameters with the extracted shape
-        self.edge_weights = nn.Parameter(torch.tensor(metadata["edge_weights"], dtype=torch.float32))
-        self.out_weights = nn.Parameter(torch.tensor(metadata["out_weights"], dtype=torch.float32))
+        # Initialize trainable parameters correctly as nn.Parameters
+        edge_data = metadata["edge_weights"].detach().clone().float() if isinstance(metadata["edge_weights"], torch.Tensor) else torch.tensor(metadata["edge_weights"], dtype=torch.float32)
+        out_data = metadata["out_weights"].detach().clone().float() if isinstance(metadata["out_weights"], torch.Tensor) else torch.tensor(metadata["out_weights"], dtype=torch.float32)
+
+        self.edge_weights = nn.Parameter(edge_data)
+        self.out_weights = nn.Parameter(out_data)
         
         # Configure quantum device
         self.backend_mode = backend_mode
@@ -33,13 +36,25 @@ class QKANModel(nn.Module):
         if self.backend_mode == "noisy":
             print("[QKAN] Noisy simulator: FakeManilaV2...")
             from qiskit_ibm_runtime.fake_provider import FakeManilaV2
-            return qml.device("qiskit.aer", wires=self.n_qubits, noise=FakeManilaV2(), backend='aer_simulator_density_matrix', shots=1024)
+            from qiskit_aer.noise import NoiseModel
+
+            fake_backend = FakeManilaV2()
+            noise_model = NoiseModel.from_backend(fake_backend)
+            
+            return qml.device("qiskit.aer",
+                                wires=self.n_qubits,
+                                noise_model=noise_model,
+                                backend='aer_simulator_density_matrix',
+                                set_shots=1024)
         elif self.backend_mode == "shots":
             print("[QKAN] Shots-based simulator...")
-            return qml.device("default.qubit", wires=self.n_qubits, shots=1024)
+            return qml.device("default.qubit",
+                                wires=self.n_qubits,
+                                set_shots=1024)
         else:
             print("[QKAN] Ideal simulator (lightning.qubit)...")
-            return qml.device("lightning.qubit", wires=self.n_qubits)
+            return qml.device("lightning.qubit",
+                                wires=self.n_qubits)
 
     def _qkan_edge(self, x_val, weights, wire):
         """
