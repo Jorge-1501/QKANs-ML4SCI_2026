@@ -15,7 +15,7 @@ def main(args):
     # Configuration and workspace setup
     CONFIG = workspace.get_config(task=args.task, seed=args.seed)
     workspace.make_dirs(CONFIG)
-    print(f"Modo de backend seleccionado (Entrenamiento): {args.train_backend} \n")
+    print(f"Selected backend mode (Training): {args.train_backend} \n")
 
     # Load classical data
     X_train, y_train, X_val, y_val, X_test, y_test, X_sample, scaler = processor.load_and_preprocess_data(
@@ -37,7 +37,7 @@ def main(args):
     if args.force or not os.path.exists(output_weights_path):
         extractor.extract_and_save(classic_model_path, output_weights_path, report_path)
     else:
-        print(f"[Orquestador] Pesos cuánticos dinámicos encontrados en {output_weights_path}. Saltando extracción.")
+        print(f"Initial Weights exist in {output_weights_path}. Skipping extraction.")
 
     # Quantum Initialization and Training
     q_trainer = QuantumKANTrainer(CONFIG, train_backend=args.train_backend)
@@ -53,16 +53,16 @@ def main(args):
     q_trainer.evaluate(X_test, y_test, eval_backend=args.eval_backend)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Entrena QKAN con arquitectura inferida del modelo clásico.")
-    parser.add_argument('--seed', type=int, default=42, help='Semilla global')
+    parser = argparse.ArgumentParser(description="Train QKAN with architecture inferred from the classical model.")
+    parser.add_argument('--seed', type=int, default=42, help='Global seed')
     parser.add_argument('--train_backend', type=str, choices=['noisy', 'ideal', 'shots'], default='ideal')
     parser.add_argument('--eval_backend', type=str, choices=['noisy', 'ideal', 'shots'], default='noisy')
-    parser.add_argument('--force', action='store_true', help='Fuerza extracción y reentrenamiento')
+    parser.add_argument('--force', action='store_true', help='Force extraction and retraining')
     parser.add_argument('--task', type=str, choices=['top', 'quark-gluon'], default='top')
     args = parser.parse_args()
     
     try:
         main(args)
     except Exception as e:
-        print(f"Ocurrió un error fatal: {e}")
+        print(f"A fatal error occurred: {e}")
         traceback.print_exc()

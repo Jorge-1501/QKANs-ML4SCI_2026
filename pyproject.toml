@@ -15,6 +15,7 @@ dependencies = [
     "polars>=1.41.2",
     "pykan",
     "pyyaml>=6.0.3",
+    "qiskit-ibm-runtime>=0.48.0",
     "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
     "tables>=3.11.0",
