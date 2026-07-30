@@ -22,7 +22,7 @@ class QuantumKANTrainer:
         
         # Initialize the model pointing to the unified .pt file
         weights_path = os.path.join(self.config["polynomial_weights_dir"], "quantum_weights.pt")
-        self.model = QKANModel(metadata_path=weights_path, backend_mode=train_backend)
+        self.model = QKANModel(graph_path=weights_path, backend_mode=train_backend)
         
         self.criterion = nn.BCEWithLogitsLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.get("qkan_learning_rate", 5e-3))
@@ -127,10 +127,10 @@ class QuantumKANTrainer:
                 best_val_auc = val_auc
                 os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
                 torch.save(copy.deepcopy(self.model.state_dict()), self.save_path)
-                print(f" -> Saving quantum model at epoch {epoch+1} (Loss: {best_val_loss:.4f} - AUC: {best_val_auc:.4f})")
+                print(f" -> Saving quantum model at epoch {epoch+1} (Loss: {val_loss:.4f} - AUC: {val_auc:.4f})")
 
-            if (val_loss < best_val_loss - early_stop_delta) and\
-                (val_auc > best_val_auc - early_stop_delta):
+            if (val_loss < best_val_loss - early_stop_delta) or\
+                (val_auc > best_val_auc + early_stop_delta):
                 best_val_loss = val_loss
                 patience_counter = 0
             else:
