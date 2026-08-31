@@ -26,11 +26,23 @@ dependencies = [
     "tqdm>=4.69.0",
 ]
 
+[project.optional-dependencies]
+cuda = ["torch"]
+cpu = ["torch"]
+
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+torch = [
+  { index = "pytorch-cu130", extra = "cuda" },
+  { index = "pytorch-cpu", extra = "cpu" },
+]
 pykan = { git = "https://github.com/kindxiaoming/pykan.git" }
