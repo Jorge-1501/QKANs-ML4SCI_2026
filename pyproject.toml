@@ -8,6 +8,7 @@ dependencies = [
     "h5py>=3.16.0",
     "hdf5plugin>=6.0.0",
     "ipykernel>=7.2.0",
+    "markitdown[all]>=0.1.5",
     "matplotlib>=3.7.2",
     "numpy>=2.4.6",
     "pandas>=2.9.0",
