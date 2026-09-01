@@ -151,7 +151,8 @@ def main(args):
             X_sample=X_sample,
             input_th=CONFIG.get("prune_input_th", 1e-2), # <-- Nuevo umbral
             node_th=CONFIG["prune_node_th"],
-            edge_th=CONFIG["prune_edge_th"]
+            edge_th=CONFIG["prune_edge_th"],
+            max_fanin=CONFIG.get("prune_max_fanin", 2)  # additive hard cap: top-N input edges per hidden neuron, by attribution score
         )
 
     # 2. Defines la ruta al archivo JSON que generó tu modelo clásico en la poda

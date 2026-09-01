@@ -144,13 +144,21 @@ class QuantumKANTrainer:
             json.dump(history, f, indent=4)
         return history
 
-    def evaluate(self, X_test, y_test, eval_backend="noisy"):
+    def evaluate(self, X_test, y_test, eval_backend="noisy", baseline=False):
         """
         Evaluate the quantum model on the test set.
         Allows changing the simulation backend specifically for evaluation.
+
+        Args:
+            - baseline (bool): if True, routes plots/metrics to the
+              *_baseline_{eval_backend} config paths instead of the plain
+              *_{eval_backend} ones, and tags the saved metrics JSON with
+              "Baseline": True. Used by evaluate_baseline() to keep pre-training
+              (warm-start-only) metrics separate from post-training ones, so
+              both can be compared side by side.
         """
         print(f"\n" + "="*50)
-        print(f"[Q-Trainer] Evaluating QKAN on the test set. Backend: '{eval_backend}'")
+        print(f"[Q-Trainer] {'Baseline ' if baseline else ''}Evaluating QKAN on the test set. Backend: '{eval_backend}'")
         print(f"="*50 + "\n")
 
         # 1. Dynamically change the backend if it is different from the training one
@@ -217,26 +225,19 @@ class QuantumKANTrainer:
         print(cm)
         print("\n" + "="*40)
 
-        # 4. Dynamic routing for saving artifacts
+        # 4. Dynamic routing for saving artifacts. baseline=True routes to the
+        # *_baseline_{eval_backend} config keys instead of the plain ones (see
+        # evaluate_baseline()), so pre- and post-training metrics never collide.
         import src.utils.metrics as viz
-        if eval_backend == "noisy":
-            viz.plot_roc_curve(test_true, test_probs, save_path=self.config['roc_qkan_noisy'])
-            viz.plot_confusion_matrix(cm, save_path=self.config['cm_qkan_noisy'])
-            viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config['pr_qkan_noisy'])
-            metrics_path = self.config['metrics_qkan_noisy']
-        elif eval_backend == "shots":
-            viz.plot_roc_curve(test_true, test_probs, save_path=self.config['roc_qkan_shots'])
-            viz.plot_confusion_matrix(cm, save_path=self.config['cm_qkan_shots'])
-            viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config['pr_qkan_shots'])
-            metrics_path = self.config['metrics_qkan_shots']
-        else:
-            viz.plot_roc_curve(test_true, test_probs, save_path=self.config['roc_qkan_ideal'])
-            viz.plot_confusion_matrix(cm, save_path=self.config['cm_qkan_ideal'])
-            viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config['pr_qkan_ideal'])
-            metrics_path = self.config['metrics_qkan_ideal']
+        suffix = "_baseline" if baseline else ""
+        viz.plot_roc_curve(test_true, test_probs, save_path=self.config[f"roc_qkan{suffix}_{eval_backend}"])
+        viz.plot_confusion_matrix(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}"])
+        viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config[f"pr_qkan{suffix}_{eval_backend}"])
+        metrics_path = self.config[f"metrics_qkan{suffix}_{eval_backend}"]
 
         metrics_dic = {
             "Backend": eval_backend,
+            "Baseline": baseline,
             "Eval Time (s)": eval_time,
             "Test AUC": test_auc,
             "Test Accuracy": test_acc,
@@ -253,3 +254,36 @@ class QuantumKANTrainer:
             json.dump(metrics_dic, f, indent=4)
 
         return metrics_dic
+
+    def evaluate_baseline(self, X_test, y_test, eval_backend="noisy"):
+        """
+        Evaluate the freshly warm-started (untrained) QKAN, before any quantum
+        fine-tuning, using the exact same metrics/plot pipeline as evaluate()
+        (F1, accuracy, AUC, precision, recall, confusion matrix, ROC/PR plots),
+        saved to *_baseline_{eval_backend} paths so they are directly comparable
+        to the post-training evaluate() call at the same backend. Measures how
+        much predictive signal survives the classical->quantum extraction alone,
+        before any quantum optimization.
+
+        Must be called before fit(): fit()'s resume path just loads a
+        state_dict without evaluating, and its from-scratch path trains
+        starting from self.model's CURRENT weights, so this has to run while
+        self.model still holds the untouched warm-start weights.
+
+        evaluate() may switch self.model.backend_mode/dev/qnode as a side
+        effect if eval_backend != self.train_backend (see evaluate() above);
+        this restores it back to self.train_backend afterwards so a subsequent
+        fit() call trains on the intended backend instead of silently training
+        under eval_backend.
+        """
+        print(f"\n[Q-Trainer] Baseline evaluation (untrained, warm-start only). Backend: '{eval_backend}'")
+        metrics = self.evaluate(X_test, y_test, eval_backend=eval_backend, baseline=True)
+
+        if self.model.backend_mode != self.train_backend:
+            print(f"[Q-Trainer] Restoring backend to '{self.train_backend}' for training...")
+            self.model.backend_mode = self.train_backend
+            self.model.dev = self.model._initialize_device()
+            import pennylane as qml
+            self.model.qnode = qml.QNode(self.model._circuit, self.model.dev, interface="torch")
+
+        return metrics

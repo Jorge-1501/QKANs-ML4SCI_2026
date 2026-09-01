@@ -62,12 +62,15 @@ def main(args):
                                         data_dir=top_path,
                                         processed_dir=CONFIG["processed_data_dir"],
                                         task=CONFIG["task"],
+                                        seed=args.seed,
                                         force_process=True
                                     )
     del top_path
     gc.collect()
     
     # Saving scaler to inference
+
+    trainer = classic.ClassicKANTrainer(CONFIG)
 
     # ============================================================================
     # STEP 2: BASE TRAINING
@@ -78,8 +81,9 @@ def main(args):
 
     if os.path.exists(base_model_state_path) and not args.force:
         print(f"Base model found at {base_model_prefix}")
+        model_base = trainer.load_checkpoint(base_model_prefix)
     else:
-        history_base = classic.train_kan_model(
+        history_base = trainer.train_kan_model(
             width=CONFIG["width"],
             grid=CONFIG["grid"],
             k=CONFIG["k"],
@@ -109,7 +113,7 @@ def main(args):
         viz.plot_auc_history(history_base, save_path=CONFIG["base_train_auc_plot"])
 
         print("\n--- Evaluation of Base Model ---")
-        model_base, eval_data_base, metrics_base = classic.evaluate_kan_model(
+        model_base, eval_data_base, metrics_base = trainer.evaluate_kan_model(
             model_save_path=base_model_prefix,
             X_test_tensor=X_test,
             y_test_tensor=y_test,

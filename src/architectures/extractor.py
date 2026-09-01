@@ -16,12 +16,23 @@ class SymbolicWarmStartExtractor:
     (nodos suma vs. nodos multiplicación, y qué aristas confluyen en cada uno),
     en vez de aplanar la red a una lista plana de inputs activos.
 
+    IMPORTANTE - de dónde lee: este extractor está pensado para correr sobre el
+    checkpoint 03_retrained (post pruning + retraining, ANTES de la simplificación
+    simbólica), y ajusta sus polinomios de Chebyshev contra la rama NUMÉRICA
+    (act_fun, splines aprendidos) de cada arista, no contra symbolic_fun. En esa
+    etapa symbolic_fun sigue siendo el placeholder cero de pykan (fix_symbolic
+    todavía no se ha llamado), así que act_fun es la única rama con información
+    real. Esto evita un ajuste-de-un-ajuste: antes se leía symbolic_fun del
+    checkpoint 05_final (post simplificación simbólica + fine-tuning), añadiendo
+    una aproximación simbólica lossy de más entre la spline aprendida y el
+    Chebyshev final.
+
     Convención de índices (idéntica a la que ya usa HEPKAN.plot(), verificada
     y funcional en tu pipeline):
         - act_fun[l].mask[i][j]        -> [nodo_previo=i][neurona_cruda=j]
         - symbolic_fun[l].mask[j][i]   -> [neurona_cruda=j][nodo_previo=i]
     Una arista (i -> j) en la capa l está activa si act_fun[l].mask[i][j] != 0
-    o symbolic_fun[l].mask[j][i] != 0.
+    (el mask de act_fun refleja la poda por sí solo en esta etapa del pipeline).
 
     IMPORTANTE - alcance de esta versión:
     Esta extracción está pensada para arquitecturas de profundidad 2
@@ -57,16 +68,30 @@ class SymbolicWarmStartExtractor:
 
         def layer_forward(x_in):
             try:
-                symbolic = model.symbolic_fun[layer_index](x_in)
-                x_out = symbolic[0] if isinstance(symbolic, tuple) else symbolic
+                # Lee la rama NUMERICA (splines) en vez de la simbolica: en el
+                # checkpoint 03_retrained, symbolic_fun[l] sigue siendo el
+                # placeholder cero de pykan (fix_symbolic aun no se ha llamado),
+                # asi que act_fun es la unica rama con informacion real en esta
+                # etapa del pipeline.
+                numeric = model.act_fun[layer_index](x_in)
+                x_out = numeric[0] if isinstance(numeric, tuple) else numeric
             except Exception:
                 out_dim = int(model.width_out[layer_index + 1])
                 x_out = torch.zeros((n, out_dim), dtype=torch.float32).to(self.device)
 
-            if hasattr(model, "node_bias") and model.node_bias is not None and len(model.node_bias) > layer_index:
-                x_out += model.node_bias[layer_index]
-            if hasattr(model, "node_scale") and model.node_scale is not None and len(model.node_scale) > layer_index:
-                x_out *= model.node_scale[layer_index]
+            # x_out esta en la dimension RAW pre-colapso por multiplicacion
+            # (width_out[l+1]), igual que output_index (ver _build_node_groups /
+            # raw_indices). El afin que corresponde a ESE punto del forward real
+            # de pykan es subnode_bias/subnode_scale (tamano width_out[l+1]), NO
+            # node_bias/node_scale (tamano width_in[l+1], que se aplica DESPUES
+            # de la colapsion por multiplicacion). Usar node_bias/node_scale aqui
+            # es un bug de forma en cualquier capa con nodos de multiplicacion
+            # supervivientes (width_out != width_in), como la capa oculta de la
+            # config de produccion (9 suma + 9 mult).
+            if hasattr(model, "subnode_bias") and model.subnode_bias is not None and len(model.subnode_bias) > layer_index:
+                x_out = x_out + model.subnode_bias[layer_index]
+            if hasattr(model, "subnode_scale") and model.subnode_scale is not None and len(model.subnode_scale) > layer_index:
+                x_out = x_out * model.subnode_scale[layer_index]
             return x_out
 
         with torch.no_grad():
@@ -145,9 +170,11 @@ class SymbolicWarmStartExtractor:
         print("[Extractor] Evaluando aristas activas: entradas -> capa oculta...")
         for j in range(n_raw_hidden):
             for i in range(n_inputs):
+                # symbolic_fun's mask is always zero at this pipeline stage
+                # (03_retrained, pre fix_symbolic) — act_fun's mask alone
+                # correctly reflects which edges survived pruning.
                 mask_act = model.act_fun[0].mask[i, j].item()
-                mask_sym = model.symbolic_fun[0].mask[j, i].item() if hasattr(model, "symbolic_fun") else 0.0
-                if mask_act == 0.0 and mask_sym == 0.0:
+                if mask_act == 0.0:
                     continue
 
                 coefs, dyn_range = self._fit_edge(model, 0, i, j, x_vals)
@@ -230,8 +257,7 @@ class SymbolicWarmStartExtractor:
         for out_j in range(n_output_raw):
             for h_collapsed in range(n_hidden_collapsed):
                 mask_act = model.act_fun[1].mask[h_collapsed, out_j].item()
-                mask_sym = model.symbolic_fun[1].mask[out_j, h_collapsed].item() if hasattr(model, "symbolic_fun") else 0.0
-                if mask_act == 0.0 and mask_sym == 0.0:
+                if mask_act == 0.0:
                     continue
                 if h_collapsed not in collapsed_to_hidden:
                     continue  # el nodo oculto que alimentaba esta arista ya fue podado del todo

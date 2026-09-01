@@ -46,7 +46,11 @@ def main(args):
     # Automatic Extraction (Agnostic Warm-Start)
     extractor = SymbolicWarmStartExtractor(CONFIG)
     
-    classic_model_path = os.path.join(CONFIG['final_model_path'], "05_final")
+    # Extraction now reads the post-retrain, pre-symbolic-fit checkpoint
+    # (03_retrained), fitting Chebyshev polynomials against the numeric spline
+    # branch directly instead of the symbolically-simplified 05_final model —
+    # avoids compounding a lossy symbolic-formula fit before the Chebyshev fit.
+    classic_model_path = os.path.join(CONFIG['retrained_model_path'], "03_retrained")
     output_weights_path = os.path.join(CONFIG["polynomial_weights_dir"], "quantum_weights.pt")
     report_path = CONFIG.get("Chebyshev_coefficients_path", os.path.join(CONFIG["results_dir"], "chebyshev_report.txt"))
     
@@ -61,19 +65,27 @@ def main(args):
     
     # Plot the dynamically generated circuit before training
     q_trainer.model.plot_circuit(CONFIG.get("circuit_plot", os.path.join(CONFIG["plots_dir"], "quantum-circuit.png")))
-    
-    # Quantum optimization loop
+
+    # Baseline evaluation: warm-started QKAN BEFORE any quantum fine-tuning, on
+    # both ideal and noisy backends, to measure how much predictive signal
+    # survives the classical->quantum extraction alone.
+    for backend in ("ideal", "noisy"):
+        q_trainer.evaluate_baseline(X_test, y_test, eval_backend=backend)
+
+    # Quantum optimization loop (trains on args.train_backend, e.g. 'ideal')
     history = q_trainer.fit(X_train, y_train, X_val, y_val, resume=True, force=args.force)
 
-    # Final Evaluation
-    # Now calling the internal method of the class
-    q_trainer.evaluate(X_test, y_test, eval_backend=args.eval_backend)
+    # Final evaluation AFTER training, on both ideal and noisy backends, so the
+    # baseline/final x ideal/noisy grid can be compared directly.
+    for backend in ("ideal", "noisy"):
+        q_trainer.evaluate(X_test, y_test, eval_backend=backend)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train QKAN with architecture inferred from the classical model.")
     parser.add_argument('--seed', type=int, default=42, help='Global seed')
     parser.add_argument('--train_backend', type=str, choices=['noisy', 'ideal', 'shots'], default='ideal')
-    parser.add_argument('--eval_backend', type=str, choices=['noisy', 'ideal', 'shots'], default='noisy')
+    # --eval_backend removed: evaluation now always runs on both 'ideal' and
+    # 'noisy' backends, before AND after training (4 evaluations total).
     parser.add_argument('--force', action='store_true', help='Force extraction and retraining')
     parser.add_argument('--task', type=str, choices=['top', 'quark-gluon'], default='top')
     args = parser.parse_args()

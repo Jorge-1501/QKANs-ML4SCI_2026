@@ -266,11 +266,15 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
             print(f"CRITICAL cache error: {e}. Falling back to execution loops.")
 
     # --- STEP 2: SEQUENTIAL PROCESS (Train, Val, Test) ---
-    raw_files = {
-        "train": DATA_DIR / "train.h5",
-        "val": DATA_DIR / "val.h5",
-        "test": DATA_DIR / "test.h5"
-    }
+    if task in ["top"]:
+        raw_files = {
+            "train": DATA_DIR / "train.h5",
+            "val": DATA_DIR / "val.h5",
+            "test": DATA_DIR / "test.h5"
+            }
+        print(f"Raw files for task '{task}':")
+        for split, path in raw_files.items():
+            print(f"  {split}: {path}")
     
     processed_tensors = {}
     scaler = None
@@ -285,9 +289,9 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
         with h5py.File(file_path, "r") as f:
             # Reconstruct structured event tables
             f = f["table"]["table"] # Navigate to the nested group containing the data
-            raw_matrix = f["values_block_0"][:50000]
+            raw_matrix = f["values_block_0"][:]
             # Index 1 holds the categorical value (1: Top Signal, 0: QCD Background)
-            raw_labels = f["values_block_1"][:50000, 1]
+            raw_labels = f["values_block_1"][:, 1]
 
         print(f"Data chunk successfully mounted in RAM. Extracted shape: {raw_matrix.shape}")
         

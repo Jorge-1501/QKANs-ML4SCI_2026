@@ -9,7 +9,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Define immutable raw data paths according to the workspace design
 RAW_QG="$REPO_ROOT/data/raw/quark_gluon"
-RAW_TOP="$REPO_ROOT/data/raw/top_tagging"
+RAW_TOP="$REPO_ROOT/data/raw/top"
 RAW_HIGGS="$REPO_ROOT/data/raw/higgs_boson"
 
 # Step 1: Guarantee the structural integrity of the raw data directory trees
@@ -52,6 +52,9 @@ echo "  out=test.h5" >> "$F_TEMPORAL"
 echo "https://zenodo.org/records/2603256/files/train.h5?download=1" >> "$F_TEMPORAL"
 echo "  dir=$RAW_TOP" >> "$F_TEMPORAL"
 echo "  out=train.h5" >> "$F_TEMPORAL"
+echo "https://zenodo.org/records/2603256/files/val.h5?download=1" >> "$F_TEMPORAL"
+echo "  dir=$RAW_TOP" >> "$F_TEMPORAL"
+echo "  out=val.h5" >> "$F_TEMPORAL"
 
 # ==============================================================================
 # PHASE B: Higgs Boson Dataset (UCI Compression Hub)
@@ -59,6 +62,7 @@ echo "  out=train.h5" >> "$F_TEMPORAL"
 # Directing the HIGGS source file to its target structural bucket
 echo "https://archive.ics.uci.edu/static/public/280/higgs.zip" >> "$F_TEMPORAL"
 echo "  dir=$RAW_HIGGS" >> "$F_TEMPORAL"
+echo "  out=higgs.zip" >> "$F_TEMPORAL"
 
 # ==============================================================================
 # PHASE C: Quark-Gluon Jet Parts (_0 to _19 Substructure Sheets)
@@ -71,9 +75,11 @@ for i in {0..19}; do
 done
 
 # Run aria2c reading from the unified mapped file configuration
+# -c  : Resume any partially completed downloads, skipping fully completed ones gracefully
+# --auto-file-renaming=false : Prevent downloading duplicate files with suffixes like .1, .2
 # -j2 : Restrict parallel file execution to prevent connection dropping
 # -x4 : Safe threshold limit per host for CERN/Zenodo protection
-aria2c -j2 -x4 -s4 --no-netrc -i "$F_TEMPORAL"
+aria2c -c --auto-file-renaming=false -j2 -x4 -s4 --no-netrc -i "$F_TEMPORAL"
 ESTADO=$?
 rm "$F_TEMPORAL"
 
@@ -82,7 +88,7 @@ echo "🧹 Sanitizing filenames & cleaning URI query suffixes..."
 echo "--------------------------------------------------"
 
 # Post-processing Phase: Clean '?download=1' strings natively within each folder
-for folder in "$RAW_QG" "$RAW_TOP"; do
+for folder in "$RAW_QG" "$RAW_TOP" "$RAW_HIGGS"; do
     if [ -d "$folder" ]; then
         # El comando cd debe hacerse en una subshell o retornar para que no deje
         # al script en un directorio diferente que rompa las rutas relativas siguientes.

@@ -179,6 +179,22 @@ def get_config(task, seed):
         "history_shots_loss_plot": os.path.join(outputs_dir, "plots", "qkan","shots", "history_loss.png"),
         "history_shots_auc_plot": os.path.join(outputs_dir, "plots", "qkan","shots", "history_auc.png"),
 
+        # Reports - QKAN evaluation - Baseline (untrained, warm-start only, pre-training)
+        "roc_qkan_baseline_noisy": os.path.join(outputs_dir, "plots", "qkan", "noisy", "baseline", "roc_qkan_baseline_noisy.png"),
+        "pr_qkan_baseline_noisy": os.path.join(outputs_dir, "plots", "qkan", "noisy", "baseline", "pr_qkan_baseline_noisy.png"),
+        "cm_qkan_baseline_noisy": os.path.join(outputs_dir, "plots", "qkan", "noisy", "baseline", "cm_qkan_baseline_noisy.png"),
+        "metrics_qkan_baseline_noisy": os.path.join(outputs_dir, "results", "qkan", "noisy", "baseline", "metrics_qkan_baseline_noisy.json"),
+
+        "roc_qkan_baseline_ideal": os.path.join(outputs_dir, "plots", "qkan", "ideal", "baseline", "roc_qkan_baseline_ideal.png"),
+        "pr_qkan_baseline_ideal": os.path.join(outputs_dir, "plots", "qkan", "ideal", "baseline", "pr_qkan_baseline_ideal.png"),
+        "cm_qkan_baseline_ideal": os.path.join(outputs_dir, "plots", "qkan", "ideal", "baseline", "cm_qkan_baseline_ideal.png"),
+        "metrics_qkan_baseline_ideal": os.path.join(outputs_dir, "results", "qkan", "ideal", "baseline", "metrics_qkan_baseline_ideal.json"),
+
+        "roc_qkan_baseline_shots": os.path.join(outputs_dir, "plots", "qkan", "shots", "baseline", "roc_qkan_baseline_shots.png"),
+        "pr_qkan_baseline_shots": os.path.join(outputs_dir, "plots", "qkan", "shots", "baseline", "pr_qkan_baseline_shots.png"),
+        "cm_qkan_baseline_shots": os.path.join(outputs_dir, "plots", "qkan", "shots", "baseline", "cm_qkan_baseline_shots.png"),
+        "metrics_qkan_baseline_shots": os.path.join(outputs_dir, "results", "qkan", "shots", "baseline", "metrics_qkan_baseline_shots.json"),
+
         "init_weights": os.path.join(data_out_dir, "quantum_weights"),
 
         # Quantum model and weights
@@ -219,6 +235,7 @@ def get_config(task, seed):
         "prune_input_th": 1e-2,
         "prune_node_th": 4e-2,
         "prune_edge_th": 6e-2,
+        "prune_max_fanin": 2,  # hard cap on active input->hidden edges per hidden neuron, additive on top of prune_node_th/prune_edge_th
 
         # --- Re-training Hyperparameters ---
         "retrain_lr": 1e-3,

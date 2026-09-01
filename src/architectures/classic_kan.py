@@ -18,7 +18,7 @@ from kan.utils import SYMBOLIC_LIB
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
-from src.architectures.hep_kan import HEPKAN
+from src.architectures.hep_kan import HEPKAN, prune_fanin
 import src.utils.metrics as viz
 
 
@@ -335,7 +335,7 @@ class ClassicKANTrainer:
 
         return self.model, (test_true, test_preds_probs, test_preds_binary), metrics
 
-    def prune_and_save_kan(self, X_sample, save_path, input_th=1e-2, node_th=1e-2, edge_th=1e-2):
+    def prune_and_save_kan(self, X_sample, save_path, input_th=1e-2, node_th=1e-2, edge_th=1e-2, max_fanin=2):
         """
         Load a trained KAN model, prune it, and save a new checkpoint
         compatible with the evaluation function.
@@ -346,6 +346,10 @@ class ClassicKANTrainer:
             - input_th (float): Threshold for pruning input features.
             - node_th (float): Threshold for pruning hidden nodes.
             - edge_th (float): Threshold for pruning edges.
+            - max_fanin (int or None): Hard cap on active input->hidden edges per hidden
+              neuron, applied ADDITIONALLY on top of node_th/edge_th threshold pruning
+              (keeps only the `max_fanin` edges with the greatest attribution score per
+              hidden neuron). Pass None to disable.
 
         Returns:
             - HEPKAN: The pruned model object, ready for retraining.
@@ -387,6 +391,16 @@ class ClassicKANTrainer:
         # Phase 2: Standard General Pruning (Hidden Nodes and Edges)
         print(f"Pruning hidden nodes and edges with node_th={node_th}, edge_th={edge_th}...")
         self.model = self.model.prune(node_th=node_th, edge_th=edge_th)
+
+        # Phase 2.5: Hard fan-in cap (ADDITIVE on top of node_th/edge_th threshold
+        # pruning), applied ONLY to the input->hidden layer (act_fun[0]). Keeps the
+        # `max_fanin` edges with the greatest attribution contribution per hidden
+        # neuron. model.prune()'s last internal step is attribute()+prune_edge(), so
+        # model.edge_scores is already fresh for this topology - no extra
+        # get_act()/attribute() call needed here.
+        if max_fanin is not None:
+            print(f"Capping input->hidden fan-in to top-{max_fanin} edges per hidden neuron...")
+            self.model = prune_fanin(self.model, max_inputs=max_fanin, layer_index=0)
 
         # Extracting the record of surviving variables
         active_input_indices = self.model.input_id.cpu().tolist()

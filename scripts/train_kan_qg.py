@@ -62,6 +62,7 @@ def main(args):
                                         data_dir=qg_path,
                                         processed_dir=CONFIG["processed_data_dir"],
                                         task=CONFIG["task"],
+                                        seed=args.seed,
                                         force_process=False
                                     )
     del qg_path

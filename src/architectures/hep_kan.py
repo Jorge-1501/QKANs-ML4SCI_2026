@@ -579,3 +579,77 @@ class HEPKAN(KAN):
 
         torch.save(model.state_dict(), f'{path}_state')
         torch.save(model.cache_data, f'{path}_cache_data')
+
+
+def prune_fanin(model, max_inputs=2, layer_index=0, log_history=True):
+    """
+    Hard cap on active incoming edges per hidden neuron in act_fun[layer_index],
+    applied ADDITIONALLY on top of whatever prune()/prune_edge() already zeroed
+    via node_th/edge_th — this only ever REMOVES edges from an already-thresholded
+    mask, never adds edges back. Ranks the currently-active edges into each raw
+    hidden neuron (column j of act_fun[layer_index].mask) by the same attribution
+    score (model.edge_scores[layer_index]) that prune_edge() itself uses, and
+    keeps only the top-`max_inputs` by score — i.e. the edges with the greatest
+    attribution contribution, never a random/arbitrary subset.
+
+    Standalone module-level function, NOT a HEPKAN method: pykan's native
+    prune_node() (called inside MultKAN.prune()) hardcodes `model2 = MultKAN(...)`
+    when rebuilding the pruned model, instead of `self.__class__(...)`. So by the
+    time this runs (right after `model = model.prune(node_th, edge_th)`), `model`
+    has already silently downcast from HEPKAN to plain MultKAN, and a HEPKAN-only
+    method would be unreachable via `model.prune_fanin(...)`. This function only
+    touches `.act_fun`, `.edge_scores`, `.attribute()`, `.log_history()` — all of
+    which exist identically on both HEPKAN and plain MultKAN.
+
+    Preconditions:
+        model.edge_scores should already reflect the CURRENT topology/mask (true
+        right after model.prune(node_th, edge_th), whose last internal step is
+        exactly attribute() -> prune_edge()). If model.edge_scores is None (e.g.
+        called standalone, outside the normal pruning flow), this recomputes it
+        via model.attribute().
+
+    Shapes (pykan convention, verified against kan/MultKAN.py prune_edge):
+        act_fun[layer_index].mask : [in_dim, out_dim]  (in_dim=width_in[layer_index], out_dim=width_out[layer_index+1])
+        edge_scores[layer_index]  : [out_dim, in_dim]  (pre-permute; prune_edge does (edge_scores[i] > th).permute(1,0))
+
+    Args:
+        - model: HEPKAN or MultKAN instance to mutate in place.
+        - max_inputs (int): max active incoming edges to keep per hidden neuron
+          (raw, pre-multiplication-collapse column of act_fun[layer_index]).
+        - layer_index (int): which act_fun layer to cap. The current pipeline
+          only calls this with layer_index=0 (input -> hidden); hidden -> output
+          (layer_index=1) is intentionally left uncapped by the caller.
+        - log_history (bool): mirrors the other HEPKAN methods' no-op logger.
+
+    Returns:
+        - model (mutated in place; same object, for `self.model = prune_fanin(self.model, ...)` chaining)
+    """
+    if model.edge_scores is None:
+        model.attribute()
+
+    old_mask = model.act_fun[layer_index].mask.data       # [in_dim, out_dim]
+    scores = model.edge_scores[layer_index]                # [out_dim, in_dim]
+    in_dim, out_dim = old_mask.shape
+
+    new_mask = old_mask.clone()
+    n_capped = 0
+    for j in range(out_dim):
+        active_i = torch.where(old_mask[:, j] > 0)[0]
+        if len(active_i) <= max_inputs:
+            continue  # already within the cap (or fully pruned already) - nothing to do
+
+        node_scores = scores[j, active_i]  # attribution score per active input, for this hidden neuron
+        top_idx = torch.topk(node_scores, k=max_inputs).indices
+        keep_i = set(active_i[top_idx].tolist())
+        drop_i = [int(i) for i in active_i.tolist() if i not in keep_i]
+        new_mask[drop_i, j] = 0.0
+        n_capped += 1
+
+    model.act_fun[layer_index].mask.data = new_mask
+    print(f"[prune_fanin] Fan-in capped to top-{max_inputs} on {n_capped}/{out_dim} "
+          f"hidden neurons of act_fun[{layer_index}] (by attribution score).")
+
+    if log_history:
+        model.log_history('prune_fanin')
+
+    return model

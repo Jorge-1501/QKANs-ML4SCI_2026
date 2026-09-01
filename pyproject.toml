@@ -53,3 +53,8 @@ torch = [
   { index = "pytorch-cpu", extra = "cpu" },
 ]
 pykan = { git = "https://github.com/kindxiaoming/pykan.git" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
