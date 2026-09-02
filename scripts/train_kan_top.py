@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-# Añadir la raíz al path para importar src y workspace
+# Add the root to the path to import src and workspace
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
 import src.utils.workspace as workspace
 import src.preprocessing.processor_top as processor
@@ -152,13 +152,15 @@ def main(args):
 
     if os.path.exists(pruned_model_state_path) and not args.force:
         print(f"Pruned model found. Skiping pruning.")
+        pruned_model = trainer.load_checkpoint(pruned_model_prefix)
     else:
-        pruned_model = classic.prune_and_save_kan(
-            original_model_path=base_model_prefix,
-            pruned_model_path=pruned_model_prefix,
-            activation_data=X_sample, # Use sample for fast pruning
+        pruned_model = trainer.prune_and_save_kan(
+            save_path=pruned_model_prefix,
+            X_sample=X_sample, # Use sample for fast pruning
+            input_th=CONFIG.get("prune_input_th", 1e-2),
             node_th=CONFIG["prune_node_th"],
-            edge_th=CONFIG["prune_edge_th"]
+            edge_th=CONFIG["prune_edge_th"],
+            max_fanin=CONFIG.get("prune_max_fanin", 2)
         )
         # del pruned_model
         gc.collect()
@@ -175,7 +177,7 @@ def main(args):
         print(f"Skipping retraining. Model found")
     else:
         # Passing the 'pruned_model' object returned from the previous function
-        final_retrained_model, history_retrain = classic.retrain_pruned_kan(
+        final_retrained_model, history_retrain = trainer.retrain_pruned_kan(
             pruned_model=pruned_model,
             learning_rate=CONFIG["retrain_lr"], num_epochs=CONFIG["retrain_epochs"],
             batch_size=CONFIG["retrain_batch_size"],
@@ -199,7 +201,7 @@ def main(args):
         viz.plot_auc_history(history_retrain, save_path=CONFIG["retrain_auc_plot"])
         
         print("\n--- Evaluation of Retrained Model ---")
-        model_retrained, eval_data_retrained, metrics_retrained = classic.evaluate_kan_model(
+        model_retrained, eval_data_retrained, metrics_retrained = trainer.evaluate_kan_model(
             model_save_path=retrained_model_prefix,
             X_test_tensor=X_test, y_test_tensor=y_test,
             conf_matrix_save_path=CONFIG["retrain_eval_cm"],
@@ -237,7 +239,7 @@ def main(args):
         print(f"Symbolic model found, skiping simplification.")
 
     else:
-        classic.simplify_and_save(
+        trainer.simplify_and_save(
             source_checkpoint_path=retrained_model_prefix,
             symbolic_model_path=symbolic_model_prefix,
             x_train_sample=X_sample, # Use sample for fitting
@@ -245,7 +247,7 @@ def main(args):
             weight_simple=CONFIG["symbolic_weight_simple"]
         )
 
-        model_symbolic, eval_data_symbolic, metrics_symbolic = classic.evaluate_kan_model(
+        model_symbolic, eval_data_symbolic, metrics_symbolic = trainer.evaluate_kan_model(
             model_save_path=symbolic_model_prefix,
             X_test_tensor=X_test, y_test_tensor=y_test,
             conf_matrix_save_path=CONFIG["symbolic_eval_cm"],
@@ -284,7 +286,7 @@ def main(args):
     if os.path.exists(final_model_state_path) and not args.force:
         print("Symbolic model with finetune found. Skipping step.")
     else:
-        _, history_finetune = classic.finetune_symbolic_model(
+        _, history_finetune = trainer.finetune_symbolic_model(
             source_symbolic_path=symbolic_model_prefix,
             final_model_path=final_model_prefix,
             X_train_tensor=X_train,
@@ -315,7 +317,7 @@ def main(args):
 # ============================================================================
     print("\n--- Step 7: Starting Final Evaluation of Adjusted Symbolic Model ---")
 
-    model_final, eval_data_final, metrics_final = classic.evaluate_kan_model(
+    model_final, eval_data_final, metrics_final = trainer.evaluate_kan_model(
         model_save_path=final_model_prefix,
         X_test_tensor=X_test, y_test_tensor=y_test,
         conf_matrix_save_path=CONFIG["final_eval_cm"],
@@ -339,7 +341,7 @@ def main(args):
 
     print(f"\n✅ Production pipeline completed in {end_time - start_time:.2f} seconds.")
 
-    model_final.get_act(X_train[:10000])
+    model_final.get_act(X_train[:10000].to(trainer.device))
     model_final.attribute()
     estructura_real = model_final.width[1]
     model_base.width[1] = [9, 0]

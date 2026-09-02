@@ -334,7 +334,7 @@ def evaluate_kan_model(model_save_path,
     print(f"Test Recall: {test_recall:.5f}")
 
     # Print Confusion Matrix
-    print("\nMatriz de Confusión:")
+    print("\nConfusion Matrix:")
     print(conf_matrix)
 
     # plot ROC curve
@@ -567,7 +567,7 @@ def retrain_pruned_kan(pruned_model,
             epochs_no_improve += 1
         
         if epochs_no_improve >= early_stop_patience:
-            print("¡Early Stopping activated for retraining!")
+            print("Early Stopping activated for retraining!")
             break
             
     retraining_time_total = time.time() - start_time

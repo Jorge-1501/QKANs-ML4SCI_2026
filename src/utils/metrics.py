@@ -110,7 +110,7 @@ def plot_precision_recall_curve(y_true, y_probs, save_path=None):
 
     
     plt.figure(figsize=(8, 6))
-    plt.title('Precisión-Recall Curve', **FONT_PARAMS)
+    plt.title('Precision-Recall Curve', **FONT_PARAMS)
     plt.plot(recall, precision, label=f'Curve PR (AUC = {pr_auc:.4f})')
     plt.xlabel('Recall', **FONT_PARAMS)
     plt.ylabel('Precision', **FONT_PARAMS)

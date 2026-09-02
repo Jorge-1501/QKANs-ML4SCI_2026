@@ -8,40 +8,40 @@ import matplotlib.pyplot as plt
 
 class QKANModel(nn.Module):
     """
-    QKAN con:
-      - n_qubits = número de ACUMULADORES (neuronas-crudas/grupos de la capa
-        oculta que sobreviven la poda), NO el número de inputs activos. Un
-        input puede re-subirse en varios wires distintos si alimenta varias
-        ramas; un wire nunca se identifica con "el input tal".
-      - Fan-out resuelto por re-uploading: la misma variable clásica se
-        vuelve a subir (RY/RZ) en cada wire-acumulador donde participe, leída
-        siempre de su propia columna de datos (in_col), nunca de un wire
-        "propio" que no existe.
-      - Suma dentro de un nodo resuelta GRATIS: aplicar RZ(theta) repetidas
-        veces sobre el MISMO wire acumula los ángulos (rotaciones sobre el
-        mismo eje se componen aditivamente) -> no requiere compuertas de 2
-        qubits para sumar.
-      - Multiplicación resuelta con IsingZZ, y SOLO entre los wires que el
-        grafo clásico podado marca como confluyentes en un nodo-mult real
-        (la profundidad/cantidad de IsingZZ es ahora dinámica, no fija).
+    QKAN with:
+      - n_qubits = number of ACCUMULATORS (raw neurons/groups of the hidden
+        layer that survive pruning), NOT the number of active inputs. An
+        input can be re-uploaded onto several different wires if it feeds
+        several branches; a wire is never identified with "the input".
+      - Fan-out solved by re-uploading: the same classical variable is
+        re-uploaded (RY/RZ) on every accumulator-wire where it participates,
+        always read from its own data column (in_col), never from an
+        "owned" wire that doesn't exist.
+      - Summation within a node solved FOR FREE: applying RZ(theta) repeatedly
+        on the SAME wire accumulates the angles (rotations on the same axis
+        compose additively) -> no 2-qubit gates needed to sum.
+      - Multiplication solved with IsingZZ, and ONLY between the wires that
+        the pruned classical graph marks as feeding into a real mult node
+        (the depth/count of IsingZZ gates is now dynamic, not fixed).
 
-    LIMITACIÓN EXPLÍCITA (no la esconde este código):
-    La etapa oculta->salida ("stage 2") no puede re-subir el valor de un
-    nodo oculto con una nueva codificación DRU exacta, porque ese valor
-    vive en la fase/rotación acumulada de un qubit, no como número clásico
-    legible sin medir. Lo que SÍ logra esta versión es que la conectividad
-    de esa segunda etapa (qué wires se combinan y con qué peso) se derive
-    del grafo real podado, en vez de ser fija como antes. Sigue siendo una
-    capa de lectura variacional, no composición funcional literal de dos
-    capas KAN. Preservar eso exactamente requeriría medición intermedia +
-    re-encoding (ver discusión previa sobre el paper QKAN).
+    EXPLICIT LIMITATION (this code doesn't hide it):
+    The hidden->output stage ("stage 2") cannot re-upload a hidden node's
+    value with a new exact DRU encoding, because that value lives in a
+    qubit's accumulated phase/rotation, not as a classical number readable
+    without measuring. What this version DOES achieve is that the
+    connectivity of that second stage (which wires combine and with what
+    weight) is derived from the real pruned graph, instead of being fixed
+    as before. It's still a variational readout layer, not a literal
+    functional composition of two KAN layers. Preserving that exactly would
+    require mid-circuit measurement + re-encoding (see earlier discussion on
+    the QKAN paper).
     """
 
     def __init__(self, graph_path, backend_mode="ideal"):
         super().__init__()
 
         if not os.path.exists(graph_path):
-            raise FileNotFoundError(f"No se encontró el grafo cuántico en {graph_path}. Ejecuta el extractor primero.")
+            raise FileNotFoundError(f"Quantum graph not found at {graph_path}. Run the extractor first.")
 
         graph = torch.load(graph_path, weights_only=False)
         self.n_qubits = graph["n_qubits"]
@@ -49,33 +49,33 @@ class QKANModel(nn.Module):
         self.degree = graph["degree"]
 
         # ------------------------------------------------------------
-        # Construcción del PLAN ESTÁTICO (una sola vez, no dentro del circuito)
+        # Building the STATIC PLAN (once, not inside the circuit)
         # ------------------------------------------------------------
-        # edge_table: lista plana de todas las aristas de capa 0 (entrada->oculta),
-        # cada una con (columna de dato a leer, wire acumulador donde escribir).
-        # zz_table: lista de transferencias de multiplicación (wire_a, wire_b).
-        # output_table: lista de aristas oculta->salida ya resueltas a wires.
+        # edge_table: flat list of all layer-0 edges (input->hidden), each with
+        # (data column to read, accumulator wire to write to).
+        # zz_table: list of multiplication transfers (wire_a, wire_b).
+        # output_table: list of hidden->output edges already resolved to wires.
         edge_table = []       # [{'in_col':.., 'acc_wire':.., 'coefs':[...]}]
         zz_table = []         # [{'wire_a':.., 'wire_b':..}]
-        hidden_final_wire = []  # por nodo oculto sobreviviente: wire que representa su valor colapsado
-        output_table = []     # [{'src_wire':.., 'coefs':[...]}]  (o marca de "mismo wire de salida")
+        hidden_final_wire = []  # per surviving hidden node: wire representing its collapsed value
+        output_table = []     # [{'src_wire':.., 'coefs':[...]}]  (or marker for "same output wire")
 
         for node in graph["hidden_nodes"]:
             raw_carrier_wires = []
             for group in node["edge_groups"]:
                 if not group:
                     continue
-                # El extractor ya asignó el MISMO wire dedicado a todas las aristas
-                # de este grupo (uno por acumulador/neurona-cruda, no por input).
+                # The extractor already assigned the SAME dedicated wire to every
+                # edge in this group (one per accumulator/raw neuron, not per input).
                 acc_wire = group[0]["wire"]
                 for edge in group:
                     assert edge["wire"] == acc_wire, (
-                        "Todas las aristas de un mismo grupo deben compartir wire "
-                        "dedicado; revisa la asignación en el extractor."
+                        "All edges in the same group must share a dedicated "
+                        "wire; check the assignment in the extractor."
                     )
                     edge_table.append({
-                        "in_col": edge["col"],   # de dónde se LEE el dato clásico (columna filtrada)
-                        "acc_wire": acc_wire,    # en qué wire se ESCRIBE la rotación (acumulador)
+                        "in_col": edge["col"],   # where the classical data is READ from (filtered column)
+                        "acc_wire": acc_wire,    # which wire the rotation is WRITTEN to (accumulator)
                         "coefs": edge["coefs"],
                     })
                 raw_carrier_wires.append(acc_wire)
@@ -84,10 +84,10 @@ class QKANModel(nn.Module):
                 continue
 
             if node["type"] == "mult" and len(raw_carrier_wires) > 1:
-                # Cadena de IsingZZ: aproximación estándar para arity > 2
-                # (IsingZZ es una interacción de 2 cuerpos; para arity>2 esto
-                # es una aproximación por composición en cadena, no un
-                # producto N-ario exacto).
+                # IsingZZ chain: standard approximation for arity > 2
+                # (IsingZZ is a 2-body interaction; for arity>2 this is a
+                # chain-composition approximation, not an exact N-ary
+                # product).
                 base = raw_carrier_wires[0]
                 for other in raw_carrier_wires[1:]:
                     zz_table.append({"wire_a": other, "wire_b": base})
@@ -95,8 +95,8 @@ class QKANModel(nn.Module):
             else:
                 hidden_final_wire.append(raw_carrier_wires[0])
 
-        # Wire de salida: el del nodo oculto con más aristas (heurística simple
-        # y determinista; cualquier wire activo serviría como acumulador final).
+        # Output wire: the one from the hidden node with the most edges (simple,
+        # deterministic heuristic; any active wire would work as a final accumulator).
         if hidden_final_wire:
             output_wire = hidden_final_wire[0]
         else:
@@ -111,13 +111,13 @@ class QKANModel(nn.Module):
         self._output_table = output_table
         self._output_wire = output_wire
 
-        print(f"[QKAN] Plan construido: {len(edge_table)} aristas de entrada, "
-              f"{len(zz_table)} transferencias IsingZZ (multiplicación), "
-              f"{len(output_table)} aristas de salida. Wire de salida: {output_wire}.")
+        print(f"[QKAN] Plan built: {len(edge_table)} input edges, "
+              f"{len(zz_table)} IsingZZ transfers (multiplication), "
+              f"{len(output_table)} output edges. Output wire: {output_wire}.")
 
         # ------------------------------------------------------------
-        # Parámetros entrenables (uno por arista/transferencia, forma (degree+1,)
-        # para las aristas de re-uploading, escalar para las IsingZZ/salida)
+        # Trainable parameters (one per edge/transfer, shape (degree+1,)
+        # for re-uploading edges, scalar for IsingZZ/output)
         # ------------------------------------------------------------
         self.edge_weights = nn.Parameter(
             torch.stack([torch.tensor(e["coefs"], dtype=torch.float32) for e in edge_table])
@@ -134,7 +134,7 @@ class QKANModel(nn.Module):
 
     def _initialize_device(self):
         if self.backend_mode == "noisy":
-            print("[QKAN] Configurando simulador ruidoso (FakeManilaV2 + NoiseModel)...")
+            print("[QKAN] Configuring noisy simulator (FakeManilaV2 + NoiseModel)...")
             from qiskit_ibm_runtime.fake_provider import FakeManilaV2
             from qiskit_aer.noise import NoiseModel
 
@@ -149,17 +149,17 @@ class QKANModel(nn.Module):
                 shots=1024,
             )
         elif self.backend_mode == "shots":
-            print("[QKAN] Configurando simulador por muestreo (shots)...")
+            print("[QKAN] Configuring shot-based simulator...")
             return qml.device("default.qubit", wires=self.n_qubits, shots=1024)
         else:
-            print("[QKAN] Configurando simulador ideal (lightning.qubit)...")
+            print("[QKAN] Configuring ideal simulator (lightning.qubit)...")
             return qml.device("lightning.qubit", wires=self.n_qubits)
 
     def _qkan_edge(self, x_val, weights, wire):
-        """Re-uploading a base de Chebyshev sobre `wire`. Llamar esto varias
-        veces sobre el MISMO wire para distintas entradas ACUMULA (suma) sus
-        contribuciones, porque las rotaciones RZ sobre el mismo eje componen
-        aditivamente sus ángulos."""
+        """Chebyshev-basis re-uploading on `wire`. Calling this several times
+        on the SAME wire for different inputs ACCUMULATES (sums) their
+        contributions, because RZ rotations on the same axis compose their
+        angles additively."""
         theta = torch.acos(torch.clamp(x_val, -0.9999, 0.9999))
         for i in range(self.degree):
             qml.RY(weights[i], wires=wire)
@@ -167,18 +167,19 @@ class QKANModel(nn.Module):
         qml.RY(weights[self.degree], wires=wire)
 
     def _circuit(self, inputs):
-        # --- Stage 1: entradas -> nodos ocultos (suma gratis + mult vía ZZ) ---
+        # --- Stage 1: inputs -> hidden nodes (free sum + mult via ZZ) ---
         for idx, edge in enumerate(self._edge_table):
-            # Lee el dato clásico de su columna (in_col); escribe la rotación en su
-            # wire dedicado (acc_wire). Si el mismo input alimenta varias ramas,
-            # aparecerá aquí varias veces con el mismo in_col pero distinto acc_wire.
+            # Reads the classical data from its column (in_col); writes the
+            # rotation to its dedicated wire (acc_wire). If the same input
+            # feeds several branches, it appears here multiple times with the
+            # same in_col but a different acc_wire.
             self._qkan_edge(inputs[edge["in_col"]], self.edge_weights[idx], wire=edge["acc_wire"])
 
         for idx, zz in enumerate(self._zz_table):
             qml.IsingZZ(self.zz_weights[idx], wires=[zz["wire_a"], zz["wire_b"]])
             qml.CNOT(wires=[zz["wire_a"], zz["wire_b"]])
 
-        # --- Stage 2: nodos ocultos -> salida (lectura variacional, ver docstring) ---
+        # --- Stage 2: hidden nodes -> output (variational readout, see docstring) ---
         for idx, oe in enumerate(self._output_table):
             if oe["src_wire"] == self._output_wire:
                 qml.RY(self.output_weights[idx][0], wires=self._output_wire)
@@ -197,14 +198,14 @@ class QKANModel(nn.Module):
         return outputs
 
     def plot_circuit(self, save_path):
-        print(f"[QKAN] Generando diagrama del circuito en {save_path}...")
-        # OJO: el argumento del qnode es el vector de DATOS clásicos filtrados
-        # (uno por columna en active_inputs), no uno por wire — son cantidades
-        # distintas ahora que un input puede escribir en varios wires.
+        print(f"[QKAN] Generating circuit diagram at {save_path}...")
+        # NOTE: the qnode's argument is the vector of filtered classical DATA
+        # (one per column in active_inputs), not one per wire — these are
+        # different quantities now that an input can write to several wires.
         dummy_inputs = torch.rand(len(self.active_inputs))
         fig, ax = qml.draw_mpl(self.qnode, decimals=2, style="pennylane")(dummy_inputs)
-        plt.title(f"QKAN estructurado ({self.n_qubits} qubits, "
-                  f"{len(self._zz_table)} nodos-mult vivos)", fontsize=20)
+        plt.title(f"Structured QKAN ({self.n_qubits} qubits, "
+                  f"{len(self._zz_table)} live mult-nodes)", fontsize=20)
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.close()

@@ -7,7 +7,6 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from src.utils import workspace
-import src.preprocessing.processor_top as processor
 from src.architectures.extractor import SymbolicWarmStartExtractor
 from src.architectures.quantum_kan import QuantumKANTrainer
 
@@ -28,6 +27,8 @@ class TeedLog:
 def main(args):
     # Configuration and workspace setup
     CONFIG = workspace.get_config(task=args.task, seed=args.seed)
+    if args.task == "top":
+        import src.preprocessing.processor_top as processor
     workspace.make_dirs(CONFIG)
     print(f"Selected backend mode (Training): {args.train_backend} \n")
 

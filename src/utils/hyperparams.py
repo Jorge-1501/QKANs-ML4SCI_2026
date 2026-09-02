@@ -1,0 +1,86 @@
+# src/utils/hyperparams.py
+# Model/training hyperparameters, isolated from workspace.py's path/output-tree logic.
+# None of these currently vary by task or seed -- only paths do (see workspace.get_config).
+
+features_globales = ['m', 'n']
+features_locales = []
+for i in range(1, 11):
+    features_locales.append(rf'DR_{i}')
+    features_locales.append(rf'pT_{i}')
+
+TOTAL_FEATURES = features_globales + features_locales
+
+
+def get_hyperparams():
+    """
+    Returns all model/training hyperparameters as a single flat dict.
+    Merged into workspace.get_config()'s output alongside the path/output-tree keys.
+    """
+    return {
+        # -----------------------------
+        # --- Classic KAN ----
+        # -----------------------------
+        "features": TOTAL_FEATURES,
+        "width": [22, [9, 9], 1],  # Architecture [input, hidden, output]
+        "grid": 5,
+        "k": 3,
+        "num_workers": 0,
+
+        # --- Base Training Hyperparameters ---
+        "base_lr": 1e-2,
+        "base_epochs": 60,
+        "base_batch_size": 65536,
+        "base_patience": 7,
+        "base_early_stop_delta": 1e-2,
+        "base_lamb": 0.01,  # Regularization weight
+        "base_lamb_l1": 0.1,
+        "base_lamb_entropy": 0.5,
+        "base_lamb_coef": 0.005,
+        "base_lamb_coefdiff": 0.01,
+        "base_update_grid_freq": 60,
+
+        # --- Pruning Hyperparameters ---
+        "prune_input_th": 1e-2,
+        "prune_node_th": 4e-2,
+        "prune_edge_th": 6e-2,
+        "prune_max_fanin": 2,  # hard cap on active input->hidden edges per hidden neuron, additive on top of prune_node_th/prune_edge_th
+
+        # --- Re-training Hyperparameters ---
+        "retrain_lr": 1e-3,
+        "retrain_epochs": 20,
+        "retrain_batch_size": 16384,
+        "retrain_patience": 6,
+        "retrain_early_stop_delta": 5e-5,
+        "retrain_lamb_l1": 0.1,
+        "retrain_lamb_entropy": 0.2,
+        "retrain_lamb_coef": 0.005,
+        "retrain_lamb_coefdiff": 0.01,
+
+        # --- Simplification (Fitting) Hyperparameters ---
+        "symbolic_r2_threshold": 0.85,
+        "symbolic_weight_simple": 0.5,
+
+        # --- Fine-Tuning Hyperparameters ---
+        "finetune_lr": 1e-5,  # Lower learning rate
+        "finetune_epochs": 15,
+        "finetune_batch_size": 512,
+        "finetune_patience": 5,
+        "finetune_early_stop_delta": 1e-6,
+
+        # ---------------------
+        # QKAN Hyperparameters
+        # ---------------------
+        "qkan_batch_size": 256,
+        "qkan_learning_rate": 5e-3,
+        "qkan_epochs": 50,
+        "qkan_patience": 8,
+        "qkan_early_stop_delta": 5e-3,
+
+        "n_train_samples_for_epoch": 1000,
+        "n_val_samples": 2000,
+
+        # --- Chebyshev Extraction Hyperparameters ---
+        "chebyshev_r2_threshold": 0.95,
+        "chebyshev_max_degree": 4,
+        "qkan_dynamic_range_threshold": 1e-3,
+    }

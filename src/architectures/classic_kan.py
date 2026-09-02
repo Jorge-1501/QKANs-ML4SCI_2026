@@ -320,7 +320,7 @@ class ClassicKANTrainer:
         print(f"Test Recall: {test_recall:.5f}")
 
         # Print Confusion Matrix
-        print("\nMatriz de Confusión:")
+        print("\nConfusion Matrix:")
         print(conf_matrix)
 
         if save_path_roc_curve: viz.plot_roc_curve(test_true, test_preds_probs, save_path=save_path_roc_curve)

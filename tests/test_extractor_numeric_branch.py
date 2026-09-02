@@ -27,7 +27,7 @@ def _make_tiny_model():
 
 def test_evaluate_isolated_edges_reads_numeric_branch_without_shape_error():
     model = _make_tiny_model()
-    extractor = SymbolicWarmStartExtractor({"chebyshev_degree": 2, "qkan_dynamic_range_threshold": 1e-3})
+    extractor = SymbolicWarmStartExtractor({"chebyshev_r2_threshold": 0.95, "chebyshev_max_degree": 4, "qkan_dynamic_range_threshold": 1e-3})
     # Force CPU regardless of what CUDA devices this machine reports -- the
     # extractor auto-picks cuda whenever torch.cuda.is_available() is True,
     # even on a GPU whose compute capability this torch build doesn't support.

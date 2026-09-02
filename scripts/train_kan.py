@@ -149,16 +149,16 @@ def main(args):
         pruned_model = trainer.prune_and_save_kan(
             save_path=pruned_model_prefix,
             X_sample=X_sample,
-            input_th=CONFIG.get("prune_input_th", 1e-2), # <-- Nuevo umbral
+            input_th=CONFIG.get("prune_input_th", 1e-2), # <-- New threshold
             node_th=CONFIG["prune_node_th"],
             edge_th=CONFIG["prune_edge_th"],
             max_fanin=CONFIG.get("prune_max_fanin", 2)  # additive hard cap: top-N input edges per hidden neuron, by attribution score
         )
 
-    # 2. Defines la ruta al archivo JSON que generó tu modelo clásico en la poda
+    # 2. Define the path to the JSON file the classical model generated during pruning
     metadata_path = os.path.join(CONFIG["pruned_model_path"], "02_pruned_metadata.json")
 
-    # 3. APLICAS EL FILTRO: Llamas a la función para reducir las dimensiones de los inputs
+    # 3. APPLY THE FILTER: call the function to reduce the input dimensions
     print("\n--- Step 2: Filtering inputs for Quantum Architecture ---")
     X_train = processor.load_quantum_inputs(metadata_path, X_train)
     X_val = processor.load_quantum_inputs(metadata_path, X_val)

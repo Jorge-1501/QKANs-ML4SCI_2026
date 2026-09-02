@@ -148,7 +148,7 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     sum_pt_final_safe = np.where(sum_pt_final <= 0, 1.0, sum_pt_final)
     z_effective = pt_block / sum_pt_final_safe[:, None]
 
-    # Forzar d_R a 0.0 en los canales vacíos remanentes de padding legítimo
+    # Force d_R to 0.0 in the remaining empty channels from legitimate padding
     d_R[pt_block <= 0.0] = 0.0
 
     del pt_block, pt_cumsum, pt_frac_cumsum, sum_pt_final, sum_pt_final_safe, idx_80
@@ -227,6 +227,23 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
         
     return processed_matrix, scaler, mass_mask
 
+
+def _balance_classes(X, y):
+    """Undersamples the majority class so each class has ~equal representation."""
+    classes, counts = np.unique(y, return_counts=True)
+    if len(classes) < 2:
+        return X, y
+    min_count = counts.min()
+    keep_indices = []
+    for c in classes:
+        class_idx = np.where(y == c)[0]
+        if len(class_idx) > min_count:
+            class_idx = np.random.choice(class_idx, size=min_count, replace=False)
+        keep_indices.append(class_idx)
+    keep_indices = np.concatenate(keep_indices)
+    np.random.shuffle(keep_indices)
+    return X[keep_indices], y[keep_indices]
+
 # ============================================================================
 # ============================================================================
 # Load and preprocess data
@@ -294,33 +311,40 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
             raw_labels = f["values_block_1"][:, 1]
 
         print(f"Data chunk successfully mounted in RAM. Extracted shape: {raw_matrix.shape}")
-        
-        # DIAGNÓSTICO ANTES DEL PROCESAMIENTO
-        print(f"--> Distribución CRUDA en disco de etiquetas para [{split.upper()}]:")
-        clases, conteos = np.unique(raw_labels, return_counts=True)
-        for c, n in zip(clases, conteos):
-            print(f"    Clase {c}: {n} eventos")
 
-        print(f"DEBUG ANTES: raw_matrix shape = {raw_matrix.shape}, raw_labels shape = {raw_labels.shape}")
+        # DIAGNOSTIC BEFORE PROCESSING
+        print(f"--> RAW on-disk label distribution for [{split.upper()}]:")
+        classes, class_counts = np.unique(raw_labels, return_counts=True)
+        for c, n in zip(classes, class_counts):
+            print(f"    Class {c}: {n} events")
+
+        print(f"DEBUG BEFORE: raw_matrix shape = {raw_matrix.shape}, raw_labels shape = {raw_labels.shape}")
 
         X_norm, split_scaler, mask = _compute_physics_features(raw_matrix, config, scaler=scaler)
 
-        print(f"DEBUG DESPUÉS: X_norm shape = {X_norm.shape}, mask True count = {np.sum(mask)}")
-        print(f"DEBUG ETIQUETAS FILTRADAS: Ceros: {np.sum(raw_labels[mask] == 0)}, Unos: {np.sum(raw_labels[mask] == 1)}")
+        print(f"DEBUG AFTER: X_norm shape = {X_norm.shape}, mask True count = {np.sum(mask)}")
+        print(f"DEBUG FILTERED LABELS: Zeros: {np.sum(raw_labels[mask] == 0)}, Ones: {np.sum(raw_labels[mask] == 1)}")
 
-        # Transform vector components
-        #X_norm, split_scaler, mask = _compute_physics_features(raw_matrix, config, scaler=scaler)
-        
         if split == "train":
             scaler = split_scaler
             with open(scaler_file, "wb") as f:
                 pickle.dump(split_scaler, f)
             print(f"Global scaler object saved to: '{scaler_file}'")
 
+        # Balance classes to ~50/50 AFTER feature engineering (the scaler above
+        # is fit on the full, unbalanced masked data; balancing only undersamples
+        # rows of the already-engineered feature matrix and labels).
+        X_masked = X_norm
+        y_masked = raw_labels[mask]
+        X_balanced, y_balanced = _balance_classes(X_masked, y_masked)
+        print(f"--> Balanced label distribution for [{split.upper()}]:")
+        balanced_classes, balanced_counts = np.unique(y_balanced, return_counts=True)
+        for c, n in zip(balanced_classes, balanced_counts):
+            print(f"    Class {c}: {n} events")
+
         # Convert straight to standalone float Torch tensors
-        processed_tensors[f"X_{split}"] = torch.from_numpy(X_norm).float()
-        #raw_labels = raw_labels[mask]
-        y_tensor = torch.from_numpy(raw_labels[mask]).float()
+        processed_tensors[f"X_{split}"] = torch.from_numpy(X_balanced).float()
+        y_tensor = torch.from_numpy(y_balanced).float()
         if y_tensor.ndim == 1:
             y_tensor = y_tensor.unsqueeze(1) # Match required [N, 1] output dimension
         processed_tensors[f"y_{split}"] = y_tensor
@@ -346,9 +370,9 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
         X_train_sample = X_train_all
     print(f"Warm-up tensor isolated. Size: {len(X_train_sample)} physics target nodes.")
 
-    # logging con clases únicas y conteo de ellas
-    print(f"Clases únicas en Train: {torch.unique(processed_tensors['y_train'])} con conteos: {torch.bincount(processed_tensors['y_train'].long().squeeze())}")
-    print(f"Clases únicas en Val: {torch.unique(processed_tensors['y_val'])} con conteos: {torch.bincount(processed_tensors['y_val'].long().squeeze())}")
+    # logging of unique classes and their counts
+    print(f"Unique classes in Train: {torch.unique(processed_tensors['y_train'])} with counts: {torch.bincount(processed_tensors['y_train'].long().squeeze())}")
+    print(f"Unique classes in Val: {torch.unique(processed_tensors['y_val'])} with counts: {torch.bincount(processed_tensors['y_val'].long().squeeze())}")
 
     # --- STEP 4: MEMORY MAP CHECKPOINT SERIALIZATION ---
     processed_data = {
@@ -374,24 +398,24 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
 
 def load_quantum_inputs(metadata_path, X_tensor):
     """
-    Lee los índices de características sobrevivientes del modelo clásico podado
-    y filtra el tensor de datos para la arquitectura cuántica.
+    Reads the surviving feature indices from the pruned classical model
+    and filters the data tensor for the quantum architecture.
     """
     import json
     import torch
-    
+
     with open(metadata_path, "r") as f:
         metadata = json.load(f)
-        
+
     active_indices = metadata.get('active_input_indices', [])
-    
+
     if not active_indices:
-        raise ValueError("No se encontraron índices activos en los metadatos.")
-        
-    print(f"Filtrando dataset cuántico. Dimensiones originales: {X_tensor.shape[1]}")
-    
-    # Rebanar el tensor conservando solo las columnas de los índices activos
+        raise ValueError("No active indices found in the metadata.")
+
+    print(f"Filtering quantum dataset. Original dimensions: {X_tensor.shape[1]}")
+
+    # Slice the tensor keeping only the columns for the active indices
     X_quantum = X_tensor[:, active_indices]
-    
-    print(f"Nuevas dimensiones para QKAN: {X_quantum.shape[1]}")
+
+    print(f"New dimensions for QKAN: {X_quantum.shape[1]}")
     return X_quantum

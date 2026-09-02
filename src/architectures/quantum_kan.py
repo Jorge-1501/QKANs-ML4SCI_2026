@@ -221,7 +221,7 @@ class QuantumKANTrainer:
         print(f"Test Recall: {test_recall:.5f}")
 
         # Print Confusion Matrix
-        print("\nMatriz de Confusión:")
+        print("\nConfusion Matrix:")
         print(cm)
         print("\n" + "="*40)
 

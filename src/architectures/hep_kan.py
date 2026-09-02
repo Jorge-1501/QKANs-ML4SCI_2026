@@ -22,7 +22,7 @@ class HEPKAN(KAN):
 
     def prune_input(self, threshold=1e-2, active_inputs=None, log_history=True):
         """
-        Override de MultKAN.prune_input.
+        Override of MultKAN.prune_input.
 
         Method to prune the input layer of the model based on a threshold. 
         If active_inputs is provided, it will use those inputs instead of 
@@ -66,7 +66,7 @@ class HEPKAN(KAN):
 
         model2 = HEPKAN(
             copy.deepcopy(self.width), grid=self.grid, k=self.k,
-            base_fun=self.base_fun_name,  # <-- FIX: string, no el módulo
+            base_fun=self.base_fun_name,  # <-- FIX: string, not the module
             mult_arity=self.mult_arity, ckpt_path=self.ckpt_path,
             auto_save=True, first_init=False, state_id=self.state_id,
             round=self.round
@@ -545,9 +545,9 @@ class HEPKAN(KAN):
         """
         model = self
         
-        # Forzar que el atributo interno vuelva a ser un string si es un módulo de PyTorch
+        # Force the internal attribute back to a string if it's a PyTorch module
         if hasattr(model, 'base_fun_name') and not isinstance(model.base_fun_name, str):
-            model.base_fun_name = 'silu'# # Valor predeterminado seguro para tu arquitectura
+            model.base_fun_name = 'silu'# # Safe default value for this architecture
             
         dic = dict(
             width = model.width,
