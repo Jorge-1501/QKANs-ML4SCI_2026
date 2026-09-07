@@ -112,16 +112,19 @@ def evaluate_qkan(CONFIG, train_backend, eval_backend, seed=42):
     if eval_backend == "noisy":
         viz.plot_roc_curve(test_true, test_probs, save_path=CONFIG['roc_qkan_noisy'])
         viz.plot_confusion_matrix(cm, save_path=CONFIG['cm_qkan_noisy'])
+        viz.plot_confusion_matrix_normalized(cm, save_path=CONFIG['cm_qkan_noisy_normalized'])
         viz.plot_precision_recall_curve(test_true, test_probs, save_path=CONFIG['pr_qkan_noisy'])
         metrics_path = CONFIG['metrics_qkan_noisy']
     elif eval_backend == "ideal":
         viz.plot_roc_curve(test_true, test_probs, save_path=CONFIG['roc_qkan_ideal'])
         viz.plot_confusion_matrix(cm, save_path=CONFIG['cm_qkan_ideal'])
+        viz.plot_confusion_matrix_normalized(cm, save_path=CONFIG['cm_qkan_ideal_normalized'])
         viz.plot_precision_recall_curve(test_true, test_probs, save_path=CONFIG['pr_qkan_ideal'])
         metrics_path = CONFIG['metrics_qkan_ideal']
     elif eval_backend == "shots":
         viz.plot_roc_curve(test_true, test_probs, save_path=CONFIG['roc_qkan_shots'])
         viz.plot_confusion_matrix(cm, save_path=CONFIG['cm_qkan_shots'])
+        viz.plot_confusion_matrix_normalized(cm, save_path=CONFIG['cm_qkan_shots_normalized'])
         viz.plot_precision_recall_curve(test_true, test_probs, save_path=CONFIG['pr_qkan_shots'])
         metrics_path = CONFIG['metrics_qkan_shots']
 

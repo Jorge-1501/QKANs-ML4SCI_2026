@@ -172,8 +172,12 @@ class QKANModel(nn.Module):
             # Reads the classical data from its column (in_col); writes the
             # rotation to its dedicated wire (acc_wire). If the same input
             # feeds several branches, it appears here multiple times with the
-            # same in_col but a different acc_wire.
-            self._qkan_edge(inputs[edge["in_col"]], self.edge_weights[idx], wire=edge["acc_wire"])
+            # same in_col but a different acc_wire. `inputs` carries a batch
+            # dimension (shape (batch, n_features)), so this reads the whole
+            # column at once -- PennyLane's parameter broadcasting then
+            # executes the full batch as one tape instead of one sample at a
+            # time (see forward()).
+            self._qkan_edge(inputs[:, edge["in_col"]], self.edge_weights[idx], wire=edge["acc_wire"])
 
         for idx, zz in enumerate(self._zz_table):
             qml.IsingZZ(self.zz_weights[idx], wires=[zz["wire_a"], zz["wire_b"]])
@@ -190,19 +194,22 @@ class QKANModel(nn.Module):
         return qml.expval(qml.PauliZ(self._output_wire))
 
     def forward(self, x):
+        # Single batched QNode call (PennyLane parameter broadcasting) instead
+        # of one Python-level call per sample: same gates, same wires, same
+        # weights per sample -- only the execution is batched so the device
+        # (lightning.qubit/default.qubit/qiskit.aer) can run the whole batch
+        # as one dispatch instead of `batch_size` separate ones.
         x_filtered = x[:, self.active_inputs]
-        batch_size = x_filtered.shape[0]
-        outputs = torch.zeros(batch_size, device=x.device)
-        for i in range(batch_size):
-            outputs[i] = self.qnode(x_filtered[i])
-        return outputs
+        outputs = self.qnode(x_filtered)
+        return outputs.to(dtype=torch.float32, device=x.device)
 
     def plot_circuit(self, save_path):
         print(f"[QKAN] Generating circuit diagram at {save_path}...")
         # NOTE: the qnode's argument is the vector of filtered classical DATA
         # (one per column in active_inputs), not one per wire — these are
         # different quantities now that an input can write to several wires.
-        dummy_inputs = torch.rand(len(self.active_inputs))
+        # _circuit now always expects a batch dimension, so draw a batch of 1.
+        dummy_inputs = torch.rand(1, len(self.active_inputs))
         fig, ax = qml.draw_mpl(self.qnode, decimals=2, style="pennylane")(dummy_inputs)
         plt.title(f"Structured QKAN ({self.n_qubits} qubits, "
                   f"{len(self._zz_table)} live mult-nodes)", fontsize=20)

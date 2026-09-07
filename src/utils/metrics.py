@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import numpy as np
 from sklearn.metrics import roc_curve, roc_auc_score, precision_recall_curve, auc
 import seaborn as sns
 
@@ -141,6 +142,33 @@ def plot_confusion_matrix(conf_matrix, save_path=None):
     if save_path:
         plt.savefig(save_path)
         print(f"Confusion matrix plot saved to '{save_path}'.")
+        plt.close()
+    else:
+        plt.show()
+
+def plot_confusion_matrix_normalized(conf_matrix, save_path=None):
+    """Row-normalized twin of plot_confusion_matrix: each true-class row sums
+    to 1, so cells read as per-class recall/error rates instead of raw counts."""
+    conf_matrix = np.asarray(conf_matrix, dtype=float)
+    row_sums = conf_matrix.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1.0
+    normalized = conf_matrix / row_sums
+
+    # Plot Normalized Confusion Matrix
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(normalized, annot=True, fmt='.2%', cmap='Blues', annot_kws={"size": 14}, vmin=0.0, vmax=1.0)
+
+    plt.title('Confusion Matrix (Normalized)', **FONT_PARAMS)
+    plt.xlabel('Predicted Value', **FONT_PARAMS)
+    plt.ylabel('Real Value', **FONT_PARAMS)
+
+    tick_labels = ['bkg (0)', 'top (1)']
+    plt.yticks(ticks=[0.5, 1.5], labels=tick_labels, **TICK_PARAMS)
+    plt.xticks(ticks=[0.5, 1.5], labels=tick_labels, **TICK_PARAMS)
+
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Normalized confusion matrix plot saved to '{save_path}'.")
         plt.close()
     else:
         plt.show()

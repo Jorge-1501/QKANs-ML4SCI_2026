@@ -118,6 +118,7 @@ def main(args):
             X_test_tensor=X_test,
             y_test_tensor=y_test,
             conf_matrix_save_path=CONFIG["base_eval_cm"],
+            conf_matrix_normalized_save_path=CONFIG["base_eval_cm_normalized"],
             save_path_roc_curve=CONFIG["base_eval_roc"],
             save_path_pr_curve=CONFIG["base_eval_pr"]
         )
@@ -205,6 +206,7 @@ def main(args):
             model_save_path=retrained_model_prefix,
             X_test_tensor=X_test, y_test_tensor=y_test,
             conf_matrix_save_path=CONFIG["retrain_eval_cm"],
+            conf_matrix_normalized_save_path=CONFIG["retrain_eval_cm_normalized"],
             save_path_roc_curve=CONFIG["retrain_eval_roc"],
             save_path_pr_curve=CONFIG["retrain_eval_pr"]
         )
@@ -251,6 +253,7 @@ def main(args):
             model_save_path=symbolic_model_prefix,
             X_test_tensor=X_test, y_test_tensor=y_test,
             conf_matrix_save_path=CONFIG["symbolic_eval_cm"],
+            conf_matrix_normalized_save_path=CONFIG["symbolic_eval_cm_normalized"],
             save_path_roc_curve=CONFIG["symbolic_eval_roc"],
             save_path_pr_curve=CONFIG["symbolic_eval_pr"]
         )
@@ -321,6 +324,7 @@ def main(args):
         model_save_path=final_model_prefix,
         X_test_tensor=X_test, y_test_tensor=y_test,
         conf_matrix_save_path=CONFIG["final_eval_cm"],
+        conf_matrix_normalized_save_path=CONFIG["final_eval_cm_normalized"],
         save_path_roc_curve=CONFIG["final_eval_roc"],
         save_path_pr_curve=CONFIG["final_eval_pr"]
     )

@@ -398,6 +398,15 @@ wheels = [
 ]
 
 [[package]]
+name = "custatevec-cu12"
+version = "1.14.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2b/5f/8c63defcc9b57a8c0f9ed9b89fd49fe69b3ac5c923ac06c5e424783d6611/custatevec_cu12-1.14.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:be8877308b5af440d815d8f768233265354d38f0f84cd38619ca1beb8b16591c", size = 73183432, upload-time = "2026-06-29T20:30:42.093Z" },
+    { url = "https://files.pythonhosted.org/packages/00/a1/a5fcf208e5e2c25eb8861532193102821d80cea36f99c9884a7b4102a4f4/custatevec_cu12-1.14.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:f5e1c22cface48ee3a6f6067238a91603899fd180c45eb2a7727e957e85825cf", size = 73170563, upload-time = "2026-06-29T20:31:00.039Z" },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1283,7 +1292,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.1.0.106"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/65/5b/cfaeebf25cd9fdec14338ccb16f6b2c4c7fa9163aefcf057d86b9cc248bb/nvidia_cusparse_cu12-12.1.0.106-py3-none-manylinux1_x86_64.whl", hash = "sha256:f3b50f42cf363f86ab21f720998517a659a48131e8d538dc02f8768237bd884c", size = 195958278, upload-time = "2023-04-19T15:51:49.939Z" },
@@ -1482,6 +1491,28 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/55/a3/54c7c47c5c4b02bd13345c370459c80492b304975cdedb8148e971a1987d/pennylane_lightning-0.45.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c90f894f958af07081eda1ba4d112c23f3eae9514fe6d1128d53c8c601a95f15", size = 25531143, upload-time = "2026-05-12T19:10:59.217Z" },
     { url = "https://files.pythonhosted.org/packages/f1/5e/f2a5be54003f26d3e628f766e50f1b06f344dce673e695174fe850b09ae4/pennylane_lightning-0.45.0-cp312-cp312-win_amd64.whl", hash = "sha256:d4ba86c22d53f92dcfdf668d605c9f74f12613080a4c6ca261092104997607ce", size = 5413913, upload-time = "2026-05-12T19:11:01.908Z" },
     { url = "https://files.pythonhosted.org/packages/84/03/c1f12a8d137c135551c9fb71890021d8958dc0d6152505907cf35854df68/pennylane_lightning-0.45.0-py3-none-any.whl", hash = "sha256:24f6c1f7db13dec80fdbe167579c5c42f1098c8f798ba9513e1b8d0906f64cc1", size = 1046727, upload-time = "2026-05-12T19:11:31.98Z" },
+]
+
+[[package]]
+name = "pennylane-lightning-gpu"
+version = "0.45.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "custatevec-cu12" },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cuda-runtime-cu12" },
+    { name = "nvidia-cusparse-cu12" },
+    { name = "nvidia-nvjitlink-cu12" },
+    { name = "pennylane" },
+    { name = "pennylane-lightning" },
+    { name = "scipy-openblas32" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/96/27323e4dffd5b7eb8e533c2c119632fc048b5ce840dfe6e4957dc6bce572/pennylane_lightning_gpu-0.45.0.tar.gz", hash = "sha256:59d578fe1b7929410c33651d6546171d23e2c9e0f91d4026beada993a2222944", size = 771076, upload-time = "2026-05-12T19:12:45.31Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/98/c1/1da030c7cca87c437146fb489361053f29bee05c52f04bb70baef0ea7f60/pennylane_lightning_gpu-0.45.0-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:82c82deaa06ca5137a2f62dcf6df6b4dc8d3aabcb245997eb2811957958370cb", size = 841307, upload-time = "2026-05-12T19:11:41.363Z" },
+    { url = "https://files.pythonhosted.org/packages/40/21/8dcb8742a2d4019af594b0cf92f353717b47b52a3a10e9796bb8cf791328/pennylane_lightning_gpu-0.45.0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:8fa158507144efa9f4e7c202e583a677c034eea303b8710d3152aef2e400b680", size = 924889, upload-time = "2026-05-12T19:11:43.125Z" },
+    { url = "https://files.pythonhosted.org/packages/41/02/2e34305da68e23af05bf8bf7d58ccb025718bad9fbf3fe8b70dd278102f4/pennylane_lightning_gpu-0.45.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:3fa52f6b04806064c51e085d0a2a322c66770ab1f344d3443838436b82bc177b", size = 840432, upload-time = "2026-05-12T19:11:44.508Z" },
+    { url = "https://files.pythonhosted.org/packages/98/05/fc9e8a00e604ccdea5b0f83acd75cb3f0112f0dbbe506293732f1f87c08d/pennylane_lightning_gpu-0.45.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:0d23463770dacc3055b12c10cae194cc6ab991d4a28aa31433093d0424f8b5b8", size = 924608, upload-time = "2026-05-12T19:11:45.709Z" },
 ]
 
 [[package]]
@@ -2045,6 +2076,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "pennylane" },
+    { name = "pennylane-lightning-gpu" },
     { name = "pennylane-qiskit" },
     { name = "polars" },
     { name = "pykan" },
@@ -2081,6 +2113,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pandas", specifier = ">=2.9.0" },
     { name = "pennylane", specifier = ">=0.40.0" },
+    { name = "pennylane-lightning-gpu", specifier = ">=0.45.0" },
     { name = "pennylane-qiskit", specifier = ">=0.40.0" },
     { name = "polars", specifier = ">=1.41.2" },
     { name = "pykan", git = "https://github.com/kindxiaoming/pykan.git" },

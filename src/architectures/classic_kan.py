@@ -255,7 +255,7 @@ class ClassicKANTrainer:
 
     def evaluate_kan_model(self, model_save_path, X_test_tensor, y_test_tensor,
                            save_path_roc_curve=None, conf_matrix_save_path=None,
-                           save_path_pr_curve=None):
+                           save_path_pr_curve=None, conf_matrix_normalized_save_path=None):
         """
         Loads a KAN model and its metadata from a checkpoint file and evaluates 
         its performance on the test set.
@@ -266,6 +266,7 @@ class ClassicKANTrainer:
             - save_path_roc_curve (str): Path to save the ROC curve plot.
             - conf_matrix_save_path (str): Path to save the confusion matrix plot.
             - save_path_pr_curve (str): Path to save the Precision-Recall curve plot.
+            - conf_matrix_normalized_save_path (str): Path to save the row-normalized confusion matrix plot.
         return:
             - model (HEPKAN): The loaded KAN model.
             - test_results (tuple): A tuple containing true labels, 
@@ -326,6 +327,7 @@ class ClassicKANTrainer:
         if save_path_roc_curve: viz.plot_roc_curve(test_true, test_preds_probs, save_path=save_path_roc_curve)
         if save_path_pr_curve: viz.plot_precision_recall_curve(test_true, test_preds_probs, save_path=save_path_pr_curve)
         if conf_matrix_save_path: viz.plot_confusion_matrix(conf_matrix, save_path=conf_matrix_save_path)
+        if conf_matrix_normalized_save_path: viz.plot_confusion_matrix_normalized(conf_matrix, save_path=conf_matrix_normalized_save_path)
 
         metrics = {
             "Test Loss": test_loss, "Test Accuracy": test_accuracy, "Test F1 Score": test_f1,

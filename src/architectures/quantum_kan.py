@@ -18,7 +18,9 @@ class QuantumKANTrainer:
     def __init__(self, config, train_backend="ideal"):
         self.config = config
         self.train_backend = train_backend
-        torch.set_num_threads(4)
+        # Use all available CPU cores for the classical-side work (loss,
+        # optimizer, grad clipping) instead of an artificial fixed cap.
+        torch.set_num_threads(max(1, os.cpu_count() or 1))
         
         # Initialize the model pointing to the unified .pt file
         weights_path = os.path.join(self.config["polynomial_weights_dir"], "quantum_weights.pt")
@@ -232,6 +234,7 @@ class QuantumKANTrainer:
         suffix = "_baseline" if baseline else ""
         viz.plot_roc_curve(test_true, test_probs, save_path=self.config[f"roc_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}"])
+        viz.plot_confusion_matrix_normalized(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}_normalized"])
         viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config[f"pr_qkan{suffix}_{eval_backend}"])
         metrics_path = self.config[f"metrics_qkan{suffix}_{eval_backend}"]
 

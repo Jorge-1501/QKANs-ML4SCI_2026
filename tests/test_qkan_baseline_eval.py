@@ -58,6 +58,9 @@ def _make_trainer(tmp_path, monkeypatch, train_backend="ideal"):
                 path = tmp_path / f"{key}.{ext}"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 config[key] = str(path)
+            cm_normalized_key = f"cm_qkan{suffix}_{backend}_normalized"
+            path = tmp_path / f"{cm_normalized_key}.png"
+            config[cm_normalized_key] = str(path)
     trainer.config = config
     return trainer
 

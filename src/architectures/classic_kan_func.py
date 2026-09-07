@@ -272,13 +272,14 @@ def clean_memory(*args):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-def evaluate_kan_model(model_save_path, 
-                       X_test_tensor, y_test_tensor, 
-                       save_path_roc_curve=None, 
+def evaluate_kan_model(model_save_path,
+                       X_test_tensor, y_test_tensor,
+                       save_path_roc_curve=None,
                        conf_matrix_save_path=None,
-                       save_path_pr_curve=None):
+                       save_path_pr_curve=None,
+                       conf_matrix_normalized_save_path=None):
     """
-    Loads a KAN model and its metadata from a checkpoint file and evaluates 
+    Loads a KAN model and its metadata from a checkpoint file and evaluates
     its performance on the test set.
     args:
         model_save_path (str): Path to the saved model checkpoint (.pth file).
@@ -287,6 +288,7 @@ def evaluate_kan_model(model_save_path,
         save_path_roc_curve (str): Path to save the ROC curve plot.
         conf_matrix_save_path (str): Path to save the confusion matrix plot.
         save_path_pr_curve (str): Path to save the Precision-Recall curve plot.
+        conf_matrix_normalized_save_path (str): Path to save the row-normalized confusion matrix plot.
     return:
         tuple: A tuple containing the loaded model, 
                a tuple of (true labels, predicted probabilities, predicted classes),
@@ -345,6 +347,7 @@ def evaluate_kan_model(model_save_path,
 
     # Plot Confusion Matrix
     viz.plot_confusion_matrix(conf_matrix, save_path=conf_matrix_save_path)
+    if conf_matrix_normalized_save_path: viz.plot_confusion_matrix_normalized(conf_matrix, save_path=conf_matrix_normalized_save_path)
 
     metrics = {
         "Test Loss": test_loss,
