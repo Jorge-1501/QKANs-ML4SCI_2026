@@ -38,7 +38,6 @@ def main(args):
     # Load classical data
     X_train, y_train, X_val, y_val, X_test, y_test, X_sample, scaler = processor.load_and_preprocess_data(
         data_dir=os.path.join("data", "raw", args.task),
-        processed_dir=CONFIG["processed_data_dir"],
         task=args.task,
         force_process=False,
         seed=args.seed

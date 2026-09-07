@@ -51,10 +51,17 @@ def get_config(task, seed):
     """
     root = get_project_root()
     seed_dir = f"seed_{seed}"
-    
+
     # Core directories
     data_out_dir = os.path.join(root, "data", "processed", task, seed_dir)
     outputs_dir = os.path.join(root, "outputs", task, seed_dir)
+
+    # Seed-INDEPENDENT directories: the canonical, build-once 15-way disjoint
+    # partition (shared across every seed/subset run) and the cross-run metrics
+    # collection table both live at the task level, not nested under seed_<seed>/.
+    canonical_dir = os.path.join(root, "data", "processed", task, "canonical")
+    aggregate_dir = os.path.join(root, "outputs", task, "aggregate")
+
     CONFIG = {
         # Base Engine Paths
         "root": root,
@@ -66,7 +73,18 @@ def get_config(task, seed):
         "processed_data_dir": data_out_dir,
         "scaler_path": os.path.join(data_out_dir, "global_scaler.pkl"),
         "cache_file": os.path.join(data_out_dir, "preprocessed_data.pt"),
-        
+
+        # Canonical (seed-independent) 15-way disjoint subset partition -- built
+        # once by scripts/run_preprocessing.py / run_preprocessing_qg.py, only ever
+        # read (never rebuilt) by the training scripts.
+        "canonical_data_dir": canonical_dir,
+        "canonical_cache_file": os.path.join(canonical_dir, "preprocessed_subsets.pt"),
+        "canonical_scaler_path": os.path.join(canonical_dir, "global_scaler.pkl"),
+
+        # Cross-run metrics collection (Parquet table, task-level)
+        "aggregate_dir": aggregate_dir,
+        "metrics_table_path": os.path.join(aggregate_dir, "metrics_table.parquet"),
+
         # Output targets for models and reports
         "models_dir": os.path.join(outputs_dir, "models", "01_base"),
         "plots_dir": os.path.join(outputs_dir, "plots"),

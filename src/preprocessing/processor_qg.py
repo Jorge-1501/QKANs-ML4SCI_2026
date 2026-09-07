@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from pathlib import Path
 from src.utils.workspace import get_config, set_seed
+from src.preprocessing.balance import balance_classes, split_into_subsets, resolve_sample_size
 
 # Global particle charge dictionary (PDG ID -> Charge)
 CHARGES_DICT = {
@@ -175,40 +176,74 @@ def _compute_qg_physics_features(X, y, config, fit_scalers=True, scaler_dict=Non
 
     return processed_matrix, scaler_dict
 
-def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_process=False):
+def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
     """
     Sequential pipeline orchestrator for loading structured Quark-Gluon data.
-    Iteratively processes .npz files and generates sub-samples for symbolic regression.
+    Iteratively processes .npz files, class-balances each split, then partitions
+    each balanced split into n_subsets mutually disjoint, class-balanced chunks
+    (the canonical partition -- built once, seed-independent, cached under
+    config["canonical_cache_file"]). Returns only the seed % n_subsets-th subset's
+    8-tuple: (X_train, y_train, X_val, y_val, X_test, y_test, X_train_sample, scalers).
+
+    force_process=True is the ONLY path that (re)builds the canonical partition --
+    reserved for scripts/run_preprocessing_qg.py. Every other caller (the training
+    scripts) must find an existing cache; a cache miss with force_process=False
+    raises RuntimeError instead of silently building it, so a --seed run can only
+    ever select a subset, never construct one.
     """
     set_seed(seed)
     config = get_config(task=task, seed=seed)
+    n_subsets = config.get("n_subsets", 15)
+    subset_split_seed = config.get("subset_split_seed", 42)
+    subset_id = seed % n_subsets
 
     DATA_DIR = Path(data_dir)
-    PROCESSED_DIR = Path(processed_dir)
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    canonical_dir = Path(config["canonical_data_dir"])
+    canonical_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_file = PROCESSED_DIR / "qg_preprocessed_data.pt"
-    scaler_file = PROCESSED_DIR / "qg_scalers.pkl"
+    cache_file = Path(config["canonical_cache_file"])
+    scaler_file = Path(config["canonical_scaler_path"])
 
     # --- STEP 1: CACHE SYSTEM DETECTOR ---
     if cache_file.exists() and not force_process:
-        print(f"\n[CACHE DETECTED] Loading preprocessed matrices from: '{cache_file}'")
+        print(f"\n[CACHE DETECTED] Loading canonical {n_subsets}-way partition from: '{cache_file}'")
         try:
             cached_data = torch.load(cache_file)
-            if scaler_file.exists():
-                with open(scaler_file, "rb") as f:
-                    scalers = pickle.load(f)
-            print(">> Multi-scale arrays successfully loaded from cache environment.")
+            if cached_data.get("n_subsets") != n_subsets:
+                raise RuntimeError(
+                    f"Cached canonical partition at '{cache_file}' has "
+                    f"n_subsets={cached_data.get('n_subsets')}, but hyperparams.py "
+                    f"currently requests n_subsets={n_subsets}. Re-run "
+                    f"scripts/run_preprocessing_qg.py with force_process=True to "
+                    f"intentionally rebuild the canonical partition."
+                )
+            with open(scaler_file, "rb") as f:
+                scalers = pickle.load(f)
+            print(f">> Selecting subset {subset_id} (seed={seed} % n_subsets={n_subsets}).")
+            set_seed(seed)
             return (
-                cached_data['X_train_tensor'], cached_data['y_train_tensor'],
-                cached_data['X_val_tensor'], cached_data['y_val_tensor'],
-                cached_data['X_test_tensor'], cached_data['y_test_tensor'],
-                cached_data['X_train_sample'], scalers
+                cached_data['X_train_subsets'][subset_id], cached_data['y_train_subsets'][subset_id],
+                cached_data['X_val_subsets'][subset_id], cached_data['y_val_subsets'][subset_id],
+                cached_data['X_test_subsets'][subset_id], cached_data['y_test_subsets'][subset_id],
+                cached_data['X_train_sample_subsets'][subset_id], scalers
             )
+        except RuntimeError:
+            raise
         except Exception as e:
             print(f"CRITICAL cache error: {e}. Falling back to execution loops.")
 
+    if not force_process:
+        raise RuntimeError(
+            f"[Preprocessing] Canonical {n_subsets}-way partition not found at "
+            f"'{cache_file}'. Training scripts only ever SELECT an existing subset, "
+            f"they never build it. Run scripts/run_preprocessing_qg.py once first to "
+            f"build the canonical partition."
+        )
+
     # --- STEP 2: SYNCHRONOUS LOAD AND SPLIT (WITH MULTIPLICITY CORRECTION) ---
+    # Uses subset_split_seed (NOT seed) so the partition is stable regardless of
+    # which seed later selects a subset from it.
+    set_seed(subset_split_seed)
     # Analytical list of .npz files from the simulated dataset (Pythia 8)
     npz_files = sorted(list(DATA_DIR.glob("QG_jets_fp32_*.npz")))
     if len(npz_files) == 0:
@@ -255,11 +290,11 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
 
     processed_tensors = {}
 
-    # --- STEP 3: CASCADE FEATURE ENGINEERING ---
+    # --- STEP 3: CASCADE FEATURE ENGINEERING (numpy arrays stay numpy through
+    # balancing/splitting -- tensor conversion is deferred to STEP 3b below) ---
     print(f"Running vectorized feature engineering for the TRAINING set...")
     X_train, scalers = _compute_qg_physics_features(X_all[train_idx], y_all[train_idx], config=config, fit_scalers=True)
-    processed_tensors["X_train"] = torch.from_numpy(X_train).float()
-    processed_tensors["y_train"] = torch.from_numpy(y_all[train_idx]).float().unsqueeze(1)
+    y_train_labels = y_all[train_idx]
 
     with open(scaler_file, "wb") as f:
         pickle.dump(scalers, f)
@@ -267,55 +302,87 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
 
     print(f"Running feature engineering for VALIDATION...")
     X_val, _ = _compute_qg_physics_features(X_all[val_idx], y_all[val_idx], config=config, fit_scalers=False, scaler_dict=scalers)
-    processed_tensors["X_val"] = torch.from_numpy(X_val).float()
-    processed_tensors["y_val"] = torch.from_numpy(y_all[val_idx]).float().unsqueeze(1)
+    y_val_labels = y_all[val_idx]
 
     print(f"Running feature engineering for TEST...")
     X_test, _ = _compute_qg_physics_features(X_all[test_idx], y_all[test_idx], config=config, fit_scalers=False, scaler_dict=scalers)
-    processed_tensors["X_test"] = torch.from_numpy(X_test).float()
-    processed_tensors["y_test"] = torch.from_numpy(y_all[test_idx]).float().unsqueeze(1)
+    y_test_labels = y_all[test_idx]
 
-    del X_all, y_all, indices, X_train, X_val, X_test
+    del X_all, y_all, indices
     gc.collect()
 
-    print("\n--- Final balanced datasets built (Vectorized Slices Framework) ---")
-    print(f"X_train shape: {processed_tensors['X_train'].shape} | y_train shape: {processed_tensors['y_train'].shape}")
-    print(f"X_val shape:   {processed_tensors['X_val'].shape} | y_val shape:   {processed_tensors['y_val'].shape}")
-    print(f"X_test shape:  {processed_tensors['X_test'].shape} | y_test shape:  {processed_tensors['y_test'].shape}")
+    # --- STEP 3b: BALANCE (per split, ~50/50) THEN PARTITION INTO n_subsets
+    # MUTUALLY DISJOINT, CLASS-BALANCED CHUNKS -- the canonical statistical-
+    # replicate partition. ---
+    for split_name, X_split, y_split in (
+        ("train", X_train, y_train_labels),
+        ("val", X_val, y_val_labels),
+        ("test", X_test, y_test_labels),
+    ):
+        X_bal, y_bal = balance_classes(X_split, y_split)
+        print(f"--> Balanced label distribution for [{split_name.upper()}]:")
+        balanced_classes, balanced_counts = np.unique(y_bal, return_counts=True)
+        for c, n in zip(balanced_classes, balanced_counts):
+            print(f"    Class {c}: {n} events")
 
-    # --- STEP 4: INTERPOLATION SAMPLE (5% Sub-sample for Symbolic Regression) ---
-    print(f"\nIsolating clean sub-sample for high-speed symbolic KAN regressions...")
-    sample_size = int(0.05 * len(processed_tensors["X_train"]))
-    X_train_all = processed_tensors["X_train"]
+        X_sub_list, y_sub_list = split_into_subsets(X_bal, y_bal, n_subsets)
+        print(f"--> Partitioned [{split_name.upper()}] into {n_subsets} disjoint subsets "
+              f"(sizes: {[len(x) for x in X_sub_list]})")
 
-    if len(X_train_all) > sample_size:
-        random_indices = torch.randperm(len(X_train_all))[:sample_size]
-        X_train_sample = X_train_all[random_indices]
-    else:
-        X_train_sample = X_train_all
-    print(f"Warm-up tensor isolated. Size: {len(X_train_sample)} physics target nodes.")
+        processed_tensors[f"X_{split_name}_subsets"] = [torch.from_numpy(x).float() for x in X_sub_list]
+        processed_tensors[f"y_{split_name}_subsets"] = [
+            torch.from_numpy(y).float().unsqueeze(1) for y in y_sub_list
+        ]
 
-    # Final sanity diagnostic of native tensor class balance
-    print(f"Unique classes in Train: {torch.unique(processed_tensors['y_train'])} with counts: {torch.bincount(processed_tensors['y_train'].long().squeeze())}")
-    print(f"Unique classes in Val: {torch.unique(processed_tensors['y_val'])} with counts: {torch.bincount(processed_tensors['y_val'].long().squeeze())}")
+    del X_train, X_val, X_test, y_train_labels, y_val_labels, y_test_labels
+    gc.collect()
 
-    # --- STEP 5: FULL SERIALIZATION OF DATA BLOCKS ---
-    processed_data = {
-        'X_train_tensor': processed_tensors["X_train"],
-        'y_train_tensor': processed_tensors["y_train"],
-        'X_val_tensor':   processed_tensors["X_val"],
-        'y_val_tensor':   processed_tensors["y_val"],
-        'X_test_tensor':  processed_tensors["X_test"],
-        'y_test_tensor':  processed_tensors["y_test"],
-        'X_train_sample': X_train_sample
+    print("\n--- Final canonical disjoint partition built (Vectorized Slices Framework) ---")
+    for split_name in ("train", "val", "test"):
+        shapes = [tuple(x.shape) for x in processed_tensors[f"X_{split_name}_subsets"]]
+        print(f"X_{split_name} subset shapes: {shapes}")
+
+    # --- STEP 4: PER-SUBSET INTERPOLATION SAMPLE (Symbolic Regression) ---
+    print(f"\nIsolating per-subset warm-up samples for high-speed symbolic KAN regressions...")
+    sample_fraction = config.get("symbolic_sample_fraction", 0.05)
+    sample_min_floor = config.get("symbolic_sample_min_floor", 500)
+    sample_fallback_size = config.get("symbolic_sample_fallback_size", 5000)
+
+    X_train_sample_subsets = []
+    for k in range(n_subsets):
+        Xk = processed_tensors["X_train_subsets"][k]
+        sample_size = resolve_sample_size(
+            len(Xk), fraction=sample_fraction,
+            min_floor=sample_min_floor, fallback_size=sample_fallback_size
+        )
+        if len(Xk) > sample_size:
+            random_indices = torch.randperm(len(Xk))[:sample_size]
+            X_train_sample_subsets.append(Xk[random_indices])
+        else:
+            X_train_sample_subsets.append(Xk)
+    print(f"Warm-up tensors isolated. Sizes: {[len(x) for x in X_train_sample_subsets]}")
+
+    # --- STEP 5: CANONICAL PARTITION SERIALIZATION ---
+    canonical_data = {
+        'X_train_subsets': processed_tensors["X_train_subsets"],
+        'y_train_subsets': processed_tensors["y_train_subsets"],
+        'X_val_subsets':   processed_tensors["X_val_subsets"],
+        'y_val_subsets':   processed_tensors["y_val_subsets"],
+        'X_test_subsets':  processed_tensors["X_test_subsets"],
+        'y_test_subsets':  processed_tensors["y_test_subsets"],
+        'X_train_sample_subsets': X_train_sample_subsets,
+        'n_subsets': n_subsets,
+        'subset_split_seed': subset_split_seed,
     }
 
-    torch.save(processed_data, cache_file)
-    print(f"\n[CACHE WRITTEN] Saving preprocessed database block into: '{cache_file}'")
+    torch.save(canonical_data, cache_file)
+    print(f"\n[CACHE WRITTEN] Canonical {n_subsets}-way partition saved to: '{cache_file}'")
 
+    print(f">> Selecting subset {subset_id} (seed={seed} % n_subsets={n_subsets}).")
+    set_seed(seed)
     return (
-        processed_data['X_train_tensor'], processed_data['y_train_tensor'],
-        processed_data['X_val_tensor'], processed_data['y_val_tensor'],
-        processed_data['X_test_tensor'], processed_data['y_test_tensor'],
-        processed_data['X_train_sample'], scalers
+        canonical_data['X_train_subsets'][subset_id], canonical_data['y_train_subsets'][subset_id],
+        canonical_data['X_val_subsets'][subset_id], canonical_data['y_val_subsets'][subset_id],
+        canonical_data['X_test_subsets'][subset_id], canonical_data['y_test_subsets'][subset_id],
+        canonical_data['X_train_sample_subsets'][subset_id], scalers
     )

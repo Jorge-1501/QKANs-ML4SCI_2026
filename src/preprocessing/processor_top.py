@@ -10,6 +10,7 @@ from pathlib import Path
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from pathlib import Path
 from src.utils.workspace import get_config, set_seed
+from src.preprocessing.balance import balance_classes, split_into_subsets, resolve_sample_size
 
 # ============================================================================
 # ============================================================================
@@ -228,61 +229,80 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     return processed_matrix, scaler, mass_mask
 
 
-def _balance_classes(X, y):
-    """Undersamples the majority class so each class has ~equal representation."""
-    classes, counts = np.unique(y, return_counts=True)
-    if len(classes) < 2:
-        return X, y
-    min_count = counts.min()
-    keep_indices = []
-    for c in classes:
-        class_idx = np.where(y == c)[0]
-        if len(class_idx) > min_count:
-            class_idx = np.random.choice(class_idx, size=min_count, replace=False)
-        keep_indices.append(class_idx)
-    keep_indices = np.concatenate(keep_indices)
-    np.random.shuffle(keep_indices)
-    return X[keep_indices], y[keep_indices]
-
 # ============================================================================
 # ============================================================================
 # Load and preprocess data
 # ============================================================================
 # ============================================================================
 
-def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_process=False):
-    """ 
-    Processes separate train.h5, val.h5, and test.h5 files sequentially.
+def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
+    """
+    Processes separate train.h5, val.h5, and test.h5 files sequentially, then
+    partitions each balanced split into n_subsets mutually disjoint, class-balanced
+    chunks (the canonical partition -- built once, seed-independent, cached under
+    config["canonical_cache_file"]). Returns only the seed % n_subsets-th subset's
+    8-tuple: (X_train, y_train, X_val, y_val, X_test, y_test, X_train_sample, scaler).
+
+    force_process=True is the ONLY path that (re)builds the canonical partition --
+    reserved for scripts/run_preprocessing.py. Every other caller (the training
+    scripts) must find an existing cache; a cache miss with force_process=False
+    raises RuntimeError instead of silently building it, so a --seed run can only
+    ever select a subset, never construct one.
     """
     set_seed(seed)
     config = get_config(task, seed)
-    
+    n_subsets = config.get("n_subsets", 15)
+    subset_split_seed = config.get("subset_split_seed", 42)
+    subset_id = seed % n_subsets
+
     DATA_DIR = Path(data_dir)
-    PROCESSED_DIR = Path(processed_dir)
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    
-    cache_file = PROCESSED_DIR / "preprocessed_data.pt"
-    scaler_file = Path(config["scaler_path"])
+    canonical_dir = Path(config["canonical_data_dir"])
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_file = Path(config["canonical_cache_file"])
+    scaler_file = Path(config["canonical_scaler_path"])
 
     # --- STEP 1: CACHE SYSTEM DETECTOR ---
     if cache_file.exists() and not force_process:
-        print(f"\n[CACHE DETECTED] Loading preprocessed matrices from: '{cache_file}'")
+        print(f"\n[CACHE DETECTED] Loading canonical {n_subsets}-way partition from: '{cache_file}'")
         try:
             cached_data = torch.load(cache_file)
-            if scaler_file.exists():
-                with open(scaler_file, "rb") as f:
-                    scaler = pickle.load(f)
-            print(">> Multi-scale arrays successfully loaded from cache environment.")
+            if cached_data.get("n_subsets") != n_subsets:
+                raise RuntimeError(
+                    f"Cached canonical partition at '{cache_file}' has "
+                    f"n_subsets={cached_data.get('n_subsets')}, but hyperparams.py "
+                    f"currently requests n_subsets={n_subsets}. Re-run "
+                    f"scripts/run_preprocessing.py with force_process=True to "
+                    f"intentionally rebuild the canonical partition."
+                )
+            with open(scaler_file, "rb") as f:
+                scaler = pickle.load(f)
+            print(f">> Selecting subset {subset_id} (seed={seed} % n_subsets={n_subsets}).")
+            set_seed(seed)
             return (
-                cached_data['X_train_tensor'], cached_data['y_train_tensor'],
-                cached_data['X_val_tensor'], cached_data['y_val_tensor'],
-                cached_data['X_test_tensor'], cached_data['y_test_tensor'],
-                cached_data['X_train_sample'], scaler
+                cached_data['X_train_subsets'][subset_id], cached_data['y_train_subsets'][subset_id],
+                cached_data['X_val_subsets'][subset_id], cached_data['y_val_subsets'][subset_id],
+                cached_data['X_test_subsets'][subset_id], cached_data['y_test_subsets'][subset_id],
+                cached_data['X_train_sample_subsets'][subset_id], scaler
             )
+        except RuntimeError:
+            raise
         except Exception as e:
             print(f"CRITICAL cache error: {e}. Falling back to execution loops.")
 
-    # --- STEP 2: SEQUENTIAL PROCESS (Train, Val, Test) ---
+    if not force_process:
+        raise RuntimeError(
+            f"[Preprocessing] Canonical {n_subsets}-way partition not found at "
+            f"'{cache_file}'. Training scripts only ever SELECT an existing subset, "
+            f"they never build it. Run scripts/run_preprocessing.py once first to "
+            f"build the canonical partition."
+        )
+
+    # --- STEP 2: SEQUENTIAL PROCESS (Train, Val, Test) -- builds the canonical
+    # partition. Uses subset_split_seed (NOT seed) so the partition is stable
+    # regardless of which seed later selects a subset from it. ---
+    set_seed(subset_split_seed)
+
     if task in ["top"]:
         raw_files = {
             "train": DATA_DIR / "train.h5",
@@ -336,64 +356,79 @@ def load_and_preprocess_data(data_dir, processed_dir, task, seed=42, force_proce
         # rows of the already-engineered feature matrix and labels).
         X_masked = X_norm
         y_masked = raw_labels[mask]
-        X_balanced, y_balanced = _balance_classes(X_masked, y_masked)
+        X_balanced, y_balanced = balance_classes(X_masked, y_masked)
         print(f"--> Balanced label distribution for [{split.upper()}]:")
         balanced_classes, balanced_counts = np.unique(y_balanced, return_counts=True)
         for c, n in zip(balanced_classes, balanced_counts):
             print(f"    Class {c}: {n} events")
 
-        # Convert straight to standalone float Torch tensors
-        processed_tensors[f"X_{split}"] = torch.from_numpy(X_balanced).float()
-        y_tensor = torch.from_numpy(y_balanced).float()
-        if y_tensor.ndim == 1:
-            y_tensor = y_tensor.unsqueeze(1) # Match required [N, 1] output dimension
-        processed_tensors[f"y_{split}"] = y_tensor
+        # Partition the balanced pool into n_subsets mutually disjoint,
+        # class-balanced chunks -- the canonical statistical-replicate partition.
+        X_sub_list, y_sub_list = split_into_subsets(X_balanced, y_balanced, n_subsets)
+        print(f"--> Partitioned [{split.upper()}] into {n_subsets} disjoint subsets "
+              f"(sizes: {[len(x) for x in X_sub_list]})")
 
-        del raw_matrix, raw_labels, X_norm, y_tensor
+        processed_tensors[f"X_{split}_subsets"] = [torch.from_numpy(x).float() for x in X_sub_list]
+        y_tensors = []
+        for y_arr in y_sub_list:
+            t = torch.from_numpy(y_arr).float()
+            if t.ndim == 1:
+                t = t.unsqueeze(1)  # Match required [N, 1] output dimension
+            y_tensors.append(t)
+        processed_tensors[f"y_{split}_subsets"] = y_tensors
+
+        del raw_matrix, raw_labels, X_norm, X_balanced, y_balanced
         gc.collect()
 
-    print("\n--- Final balanced datasets built (Vectorized Slices Framework) ---")
-    print(f"X_train shape: {processed_tensors['X_train'].shape} | y_train shape: {processed_tensors['y_train'].shape}")
-    print(f"X_val shape:   {processed_tensors['X_val'].shape} | y_val shape:   {processed_tensors['y_val'].shape}")
-    print(f"X_test shape:  {processed_tensors['X_test'].shape} | y_test shape:  {processed_tensors['y_test'].shape}")
+    print("\n--- Final canonical disjoint partition built (Vectorized Slices Framework) ---")
+    for split in ("train", "val", "test"):
+        shapes = [tuple(x.shape) for x in processed_tensors[f"X_{split}_subsets"]]
+        print(f"X_{split} subset shapes: {shapes}")
 
-    # --- STEP 3: SYMBOLIC INTERPOLATION SAMPLE (10k Sub-sample) ---
-    print(f"\nIsolating clean sub-sample for high-speed symbolic KAN regressions...")
-    sample_size = int(0.05*len(processed_tensors["X_train"]))
-    X_train_all = processed_tensors["X_train"]
-    
-    if len(X_train_all) > sample_size:
-        # Uniform sampling permutation over the GPU/CPU data graph boundary
-        random_indices = torch.randperm(len(X_train_all))[:sample_size]
-        X_train_sample = X_train_all[random_indices]
-    else:
-        X_train_sample = X_train_all
-    print(f"Warm-up tensor isolated. Size: {len(X_train_sample)} physics target nodes.")
+    # --- STEP 3: PER-SUBSET SYMBOLIC INTERPOLATION SAMPLE ---
+    print(f"\nIsolating per-subset warm-up samples for high-speed symbolic KAN regressions...")
+    sample_fraction = config.get("symbolic_sample_fraction", 0.05)
+    sample_min_floor = config.get("symbolic_sample_min_floor", 500)
+    sample_fallback_size = config.get("symbolic_sample_fallback_size", 5000)
 
-    # logging of unique classes and their counts
-    print(f"Unique classes in Train: {torch.unique(processed_tensors['y_train'])} with counts: {torch.bincount(processed_tensors['y_train'].long().squeeze())}")
-    print(f"Unique classes in Val: {torch.unique(processed_tensors['y_val'])} with counts: {torch.bincount(processed_tensors['y_val'].long().squeeze())}")
+    X_train_sample_subsets = []
+    for k in range(n_subsets):
+        Xk = processed_tensors["X_train_subsets"][k]
+        sample_size = resolve_sample_size(
+            len(Xk), fraction=sample_fraction,
+            min_floor=sample_min_floor, fallback_size=sample_fallback_size
+        )
+        if len(Xk) > sample_size:
+            random_indices = torch.randperm(len(Xk))[:sample_size]
+            X_train_sample_subsets.append(Xk[random_indices])
+        else:
+            X_train_sample_subsets.append(Xk)
+    print(f"Warm-up tensors isolated. Sizes: {[len(x) for x in X_train_sample_subsets]}")
 
-    # --- STEP 4: MEMORY MAP CHECKPOINT SERIALIZATION ---
-    processed_data = {
-        'X_train_tensor': processed_tensors["X_train"],
-        'y_train_tensor': processed_tensors["y_train"],
-        'X_val_tensor':   processed_tensors["X_val"],
-        'y_val_tensor':   processed_tensors["y_val"],
-        'X_test_tensor':  processed_tensors["X_test"],
-        'y_test_tensor':  processed_tensors["y_test"],
-        'X_train_sample': X_train_sample
+    # --- STEP 4: CANONICAL PARTITION SERIALIZATION ---
+    canonical_data = {
+        'X_train_subsets': processed_tensors["X_train_subsets"],
+        'y_train_subsets': processed_tensors["y_train_subsets"],
+        'X_val_subsets':   processed_tensors["X_val_subsets"],
+        'y_val_subsets':   processed_tensors["y_val_subsets"],
+        'X_test_subsets':  processed_tensors["X_test_subsets"],
+        'y_test_subsets':  processed_tensors["y_test_subsets"],
+        'X_train_sample_subsets': X_train_sample_subsets,
+        'n_subsets': n_subsets,
+        'subset_split_seed': subset_split_seed,
     }
-    
-    torch.save(processed_data, cache_file)
-    print(f"\n[CACHE WRITTEN] Saving preprocessed database block into: '{cache_file}'")
+
+    torch.save(canonical_data, cache_file)
+    print(f"\n[CACHE WRITTEN] Canonical {n_subsets}-way partition saved to: '{cache_file}'")
     print(f"Inference metrics scaler object written into workspace folder structures.")
 
+    print(f">> Selecting subset {subset_id} (seed={seed} % n_subsets={n_subsets}).")
+    set_seed(seed)
     return (
-        processed_data['X_train_tensor'], processed_data['y_train_tensor'],
-        processed_data['X_val_tensor'], processed_data['y_val_tensor'],
-        processed_data['X_test_tensor'], processed_data['y_test_tensor'],
-        processed_data['X_train_sample'], scaler
+        canonical_data['X_train_subsets'][subset_id], canonical_data['y_train_subsets'][subset_id],
+        canonical_data['X_val_subsets'][subset_id], canonical_data['y_val_subsets'][subset_id],
+        canonical_data['X_test_subsets'][subset_id], canonical_data['y_test_subsets'][subset_id],
+        canonical_data['X_train_sample_subsets'][subset_id], scaler
     )
 
 def load_quantum_inputs(metadata_path, X_tensor):

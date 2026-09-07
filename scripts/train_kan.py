@@ -53,7 +53,6 @@ def main(args):
     X_test, y_test, \
     X_sample, scaler = processor.load_and_preprocess_data(
         data_dir=top_path,
-        processed_dir=CONFIG["processed_data_dir"],
         task=CONFIG["task"],
         seed=args.seed,
         force_process=False

@@ -14,7 +14,6 @@ def main():
     # This automatically checks the cache, if it doesn't exist, processes and saves
     X_train, y_train, X_val, y_val, X_test, y_test, X_sample, scaler = load_and_preprocess_data(
         data_dir=top_path,
-        processed_dir=config["processed_data_dir"],
         task="top",
         force_process=True
     )

@@ -83,4 +83,22 @@ def get_hyperparams():
         "chebyshev_r2_threshold": 0.95,
         "chebyshev_max_degree": 4,
         "qkan_dynamic_range_threshold": 1e-3,
+
+        # --- Statistical-replicate subset splitting ---
+        # After transform + balance, each split (train/val/test) is partitioned into
+        # n_subsets mutually disjoint, class-balanced chunks. A training run's --seed
+        # selects which chunk it trains on via seed % n_subsets; subset_split_seed
+        # seeds ONLY the one-time canonical partition itself, decoupled from --seed,
+        # so the partition is stable regardless of which seed later selects a subset.
+        "n_subsets": 15,
+        "subset_split_seed": 42,
+
+        # --- Symbolic-regression warm-up sample sizing ---
+        # X_train_sample is drawn as `symbolic_sample_fraction` of a subset's own
+        # train chunk; if that falls under `symbolic_sample_min_floor` (a 1/15 subset
+        # is much smaller than the old full-dataset pool), `symbolic_sample_fallback_size`
+        # is used instead (capped to the subset's own size). See balance.resolve_sample_size.
+        "symbolic_sample_fraction": 0.05,
+        "symbolic_sample_min_floor": 500,
+        "symbolic_sample_fallback_size": 5000,
     }
