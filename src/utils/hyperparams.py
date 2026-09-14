@@ -90,7 +90,7 @@ def get_hyperparams():
         # selects which chunk it trains on via seed % n_subsets; subset_split_seed
         # seeds ONLY the one-time canonical partition itself, decoupled from --seed,
         # so the partition is stable regardless of which seed later selects a subset.
-        "n_subsets": 15,
+        "n_subsets": 1,
         "subset_split_seed": 42,
 
         # --- Symbolic-regression warm-up sample sizing ---

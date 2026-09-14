@@ -60,8 +60,8 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     gc.collect()
 
     # Global kinematic filter for the Jet (Invariant Mass > 10 GeV)
-    mass_mask = (invariant_mass > 95.0) & (invariant_mass < 176.0)
-    #mass_mask = invariant_mass > 10.0
+    #mass_mask = (invariant_mass > 145.0) & (invariant_mass < 205.0)
+    mass_mask = invariant_mass >= 0.0
     invariant_mass = invariant_mass[mass_mask]
     raw_matrix = raw_matrix[mass_mask]
     eta_jet = eta_jet[mass_mask]
@@ -235,7 +235,7 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
 # ============================================================================
 # ============================================================================
 
-def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
+def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, balance=False):
     """
     Processes separate train.h5, val.h5, and test.h5 files sequentially, then
     partitions each balanced split into n_subsets mutually disjoint, class-balanced
@@ -351,16 +351,21 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
                 pickle.dump(split_scaler, f)
             print(f"Global scaler object saved to: '{scaler_file}'")
 
-        # Balance classes to ~50/50 AFTER feature engineering (the scaler above
-        # is fit on the full, unbalanced masked data; balancing only undersamples
-        # rows of the already-engineered feature matrix and labels).
-        X_masked = X_norm
-        y_masked = raw_labels[mask]
-        X_balanced, y_balanced = balance_classes(X_masked, y_masked)
-        print(f"--> Balanced label distribution for [{split.upper()}]:")
-        balanced_classes, balanced_counts = np.unique(y_balanced, return_counts=True)
-        for c, n in zip(balanced_classes, balanced_counts):
-            print(f"    Class {c}: {n} events")
+        if balance:
+            # Balance classes to ~50/50 AFTER feature engineering (the scaler above
+            # is fit on the full, unbalanced masked data; balancing only undersamples
+            # rows of the already-engineered feature matrix and labels).
+            X_masked = X_norm
+            y_masked = raw_labels[mask]
+            X_balanced, y_balanced = balance_classes(X_masked, y_masked)
+            print(f"--> Balanced label distribution for [{split.upper()}]:")
+            balanced_classes, balanced_counts = np.unique(y_balanced, return_counts=True)
+            for c, n in zip(balanced_classes, balanced_counts):
+                print(f"    Class {c}: {n} events")
+
+        else:
+            X_balanced = X_norm
+            y_balanced = raw_labels[mask]
 
         # Partition the balanced pool into n_subsets mutually disjoint,
         # class-balanced chunks -- the canonical statistical-replicate partition.
