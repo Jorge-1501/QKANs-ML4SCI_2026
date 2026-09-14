@@ -1,5 +1,7 @@
 # workspace.py
 import os
+import json
+import datetime
 import numpy as np
 import torch
 import random
@@ -38,6 +40,26 @@ def make_dirs(config):
                 path.parent.mkdir(parents=True, exist_ok=True)
             else:
                 path.mkdir(parents=True, exist_ok=True)
+
+def write_hyperparams_snapshot(config, extra=None):
+    """
+    Serializes this run's resolved hyperparameters to config["hyperparams_report_path"]
+    as JSON: task, seed, a timestamp, the subset of `config` matching get_hyperparams()'s
+    keys (so it reflects what this config object actually resolved to), and an optional
+    `extra` dict of script-identifying info (e.g. parsed CLI args) under 'run_args'.
+    """
+    hp_keys = get_hyperparams().keys()
+    snapshot = {
+        "task": config.get("task"),
+        "seed": config.get("seed"),
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "hyperparams": {k: config[k] for k in hp_keys if k in config},
+        "run_args": extra or {},
+    }
+    path = Path(config["hyperparams_report_path"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(snapshot, f, indent=2, default=str)
 
 # ============================================================================
 # STEP 1: CONFIGURATION
@@ -89,6 +111,8 @@ def get_config(task, seed):
         "models_dir": os.path.join(outputs_dir, "models", "01_base"),
         "plots_dir": os.path.join(outputs_dir, "plots"),
         "results_dir": os.path.join(outputs_dir, "results"),
+        "logs_dir": os.path.join(outputs_dir, "logs"),
+        "hyperparams_report_path": os.path.join(outputs_dir, "hyperparameters.json"),
 
         # reports
         "base_train_history_data": os.path.join(outputs_dir, "results", "01_base", "base_train_history.json"),
@@ -231,6 +255,21 @@ def get_config(task, seed):
         "qkan_noisy_path": os.path.join(data_out_dir, "quantum_weights", "qkan_noisy.pth"),
         "qkan_ideal_path": os.path.join(data_out_dir, "quantum_weights", "qkan_ideal.pth"),
         "qkan_shots_path": os.path.join(data_out_dir, "quantum_weights", "qkan_shots.pth"),
+
+        # ----------------------------------
+        # --- Random Forest baseline paths ---
+        # ----------------------------------
+        "rf_model_path": os.path.join(outputs_dir, "models", "rf", "rf_model.joblib"),
+        "rf_eval_data_true": os.path.join(outputs_dir, "results", "rf", "rf_eval_true.npy"),
+        "rf_eval_data_probs": os.path.join(outputs_dir, "results", "rf", "rf_eval_probs.npy"),
+        "rf_eval_data_binary": os.path.join(outputs_dir, "results", "rf", "rf_eval_binary.npy"),
+        "rf_eval_metrics": os.path.join(outputs_dir, "results", "rf", "rf_eval_metrics.json"),
+        "rf_feature_importance_data": os.path.join(outputs_dir, "results", "rf", "rf_feature_importance.json"),
+        "rf_eval_cm": os.path.join(outputs_dir, "plots", "rf", "rf_eval_cm.png"),
+        "rf_eval_cm_normalized": os.path.join(outputs_dir, "plots", "rf", "rf_eval_cm_normalized.png"),
+        "rf_eval_roc": os.path.join(outputs_dir, "plots", "rf", "rf_eval_roc.png"),
+        "rf_eval_pr": os.path.join(outputs_dir, "plots", "rf", "rf_eval_pr.png"),
+        "rf_feature_importance_plot": os.path.join(outputs_dir, "plots", "rf", "rf_feature_importance.png"),
     }
 
     CONFIG.update(get_hyperparams())

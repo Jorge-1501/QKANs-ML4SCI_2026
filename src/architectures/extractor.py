@@ -45,7 +45,9 @@ class SymbolicWarmStartExtractor:
     def __init__(self, config):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.r2_threshold = self.config.get("chebyshev_r2_threshold", 0.95)
+        # Fixed Chebyshev degree (not a search ceiling): every edge is fit at
+        # exactly this degree, no R2-gated minimum-degree search. See
+        # reports/AUC_test/ for why the search was reverted.
         self.max_degree = self.config.get("chebyshev_max_degree", 4)
         # Dynamic-range threshold: an edge with negligible variation
         # (Δy = max(y) - min(y)) is discarded, same as before, but now
@@ -53,8 +55,7 @@ class SymbolicWarmStartExtractor:
         self.dynamic_range_threshold = self.config.get("qkan_dynamic_range_threshold", 1e-3)
 
     # ------------------------------------------------------------------
-    # Isolated evaluation of one edge (identical to the original version,
-    # now generalized by (layer_index, input_index, output_index))
+    # Isolated evaluation of one edge
     # ------------------------------------------------------------------
     def _evaluate_isolated_edges(self, model, layer_index, input_index, output_index, x_vals):
         layer_width = model.width[layer_index]
@@ -105,12 +106,30 @@ class SymbolicWarmStartExtractor:
 
     def _fit_edge(self, model, layer_index, input_index, output_index, x_vals):
         """
-        Fits a Chebyshev polynomial to this edge's isolated response, picking
-        the MINIMUM degree (1..self.max_degree) whose R2 clears
-        self.r2_threshold -- mirroring ClassicKANTrainer's symbolic-fitting
-        pattern (brute-force candidates, gate by an r2_threshold, keep the
-        first/best one). If no degree clears the threshold, falls back to the
-        candidate with the highest R2 among all degrees tried.
+        Fits a Chebyshev polynomial to this edge's isolated response at a
+        FIXED degree (self.max_degree) -- no R2-gated search, no early
+        acceptance at a lower degree. This mirrors the historical (pre-brute-
+        force-search) extraction behavior: chebfit is a discrete least-
+        squares refit at each degree, not a truncation of one fixed fit, so
+        accepting a lower degree the moment it clears an R2 threshold
+        silently produces different low-order coefficients rather than just
+        dropping high-order terms -- on the smaller post-split training
+        subsets this was gating on noisy low-degree fits and collapsing
+        downstream AUC (see reports/AUC_test/qkan_chebyshev_min_degree_experiment.md).
+
+        Args:
+            model: The neural network model.
+            layer_index: Index of the source layer.
+            input_index: Index of the input neuron in the source layer.
+            output_index: Index of the output neuron in the destination layer.
+            x_vals: Input values to evaluate the edge response.
+
+        Returns:
+            A tuple (coefs, dynamic_range, degree, r2) where:
+                coefs: List of Chebyshev polynomial coefficients.
+                dynamic_range: Dynamic range of the edge response.
+                degree: Degree of the fitted Chebyshev polynomial (always self.max_degree).
+                r2: R-squared value of the fit (reported, not used to gate).
         """
         y_vals = self._evaluate_isolated_edges(model, layer_index, input_index, output_index, x_vals)
         dynamic_range = float(np.max(y_vals) - np.min(y_vals))
@@ -118,18 +137,11 @@ class SymbolicWarmStartExtractor:
         ss_tot = float(np.sum((y_vals - np.mean(y_vals)) ** 2))
         ss_tot_safe = ss_tot if ss_tot > 1e-12 else 1e-12
 
-        best_degree, best_coefs, best_r2 = None, None, -np.inf
-        for degree in range(1, self.max_degree + 1):
-            coefs = chebfit(x_vals, y_vals, deg=degree)
-            y_pred = chebval(x_vals, coefs)
-            r2 = 1.0 - float(np.sum((y_vals - y_pred) ** 2)) / ss_tot_safe
-            if r2 >= self.r2_threshold:
-                return coefs.tolist(), dynamic_range, degree, r2
-            if r2 > best_r2:
-                best_degree, best_coefs, best_r2 = degree, coefs, r2
+        coefs = chebfit(x_vals, y_vals, deg=self.max_degree)
+        y_pred = chebval(x_vals, coefs)
+        r2 = 1.0 - float(np.sum((y_vals - y_pred) ** 2)) / ss_tot_safe
 
-        # No degree cleared the threshold -- keep the highest-R2 candidate tried.
-        return best_coefs.tolist(), dynamic_range, best_degree, best_r2
+        return coefs.tolist(), dynamic_range, self.max_degree, r2
 
     # ------------------------------------------------------------------
     # Grouping of raw neurons into collapsed nodes (sum / mult), replicating

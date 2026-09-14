@@ -25,8 +25,10 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     N is the number of jets and m is the number of features (2 + 2 * n_particles).
     The last 4 features are the global jet four-momentum components (E, px, py, pz) and the 
     rest are the four-momentum particle-level features.
-    The first two columns are global jet properties (scaled invariant mass and multiplicity), 
-    followed by pairs of columns for each particle: [dR_i, z_i].
+    The first two columns are global jet properties (scaled invariant mass and multiplicity),
+    followed by pairs of columns for each particle: [dR_i, z_i]. The function optionally applies
+    a cut in the invariant mass between config['mass_cut_lo'] and config['mass_cut_hi'] GeV,
+    controlled by config['apply_mass_cut'] (default True); when False, all jets are kept.
 
     - dr: Geometric distance of the i-th particle from the jet axis in the (eta, phi) plane.
     - z: Fraction of the jet's transverse momentum carried by the i-th particle.
@@ -59,9 +61,15 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
     del px_jet, py_jet, pz_jet, E_jet, pt_jet, mass_sq
     gc.collect()
 
-    # Global kinematic filter for the Jet (Invariant Mass > 10 GeV)
-    mass_mask = (invariant_mass > 95.0) & (invariant_mass < 176.0)
-    #mass_mask = invariant_mass > 10.0
+    # Global kinematic filter for the Jet. Controlled by config["apply_mass_cut"];
+    # when False, all jets pass (no invariant-mass cut is applied).
+    apply_mass_cut = config.get("apply_mass_cut", True)
+    mass_cut_lo = config.get("mass_cut_lo", 145.0)
+    mass_cut_hi = config.get("mass_cut_hi", 205.0)
+    if apply_mass_cut:
+        mass_mask = (invariant_mass > mass_cut_lo) & (invariant_mass < mass_cut_hi)
+    else:
+        mass_mask = np.ones_like(invariant_mass, dtype=bool)
     invariant_mass = invariant_mass[mass_mask]
     raw_matrix = raw_matrix[mass_mask]
     eta_jet = eta_jet[mass_mask]
@@ -235,7 +243,7 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
 # ============================================================================
 # ============================================================================
 
-def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
+def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, apply_mass_cut=None):
     """
     Processes separate train.h5, val.h5, and test.h5 files sequentially, then
     partitions each balanced split into n_subsets mutually disjoint, class-balanced
@@ -251,6 +259,17 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
     """
     set_seed(seed)
     config = get_config(task, seed)
+    if apply_mass_cut is not None:
+        config["apply_mass_cut"] = apply_mass_cut
+
+    # Physically separate the canonical cache by mass-cut setting so switching the
+    # flag never silently reuses a cache built under a different setting.
+    resolved_mass_cut = config.get("apply_mass_cut", True)
+    mass_cut_suffix = "mass_cut" if resolved_mass_cut else "no_mass_cut"
+    config["canonical_data_dir"] = os.path.join(config["canonical_data_dir"], mass_cut_suffix)
+    config["canonical_cache_file"] = os.path.join(config["canonical_data_dir"], "preprocessed_subsets.pt")
+    config["canonical_scaler_path"] = os.path.join(config["canonical_data_dir"], "global_scaler.pkl")
+
     n_subsets = config.get("n_subsets", 15)
     subset_split_seed = config.get("subset_split_seed", 42)
     subset_id = seed % n_subsets
@@ -416,6 +435,9 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
         'X_train_sample_subsets': X_train_sample_subsets,
         'n_subsets': n_subsets,
         'subset_split_seed': subset_split_seed,
+        'apply_mass_cut': resolved_mass_cut,
+        'mass_cut_lo': config.get("mass_cut_lo", 145.0),
+        'mass_cut_hi': config.get("mass_cut_hi", 205.0),
     }
 
     torch.save(canonical_data, cache_file)
