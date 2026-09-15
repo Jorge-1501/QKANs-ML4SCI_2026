@@ -140,3 +140,69 @@ def test_prune_and_save_kan_call_sites_use_real_kwargs():
                 f"{path.name} calls prune_and_save_kan with unknown kwargs {unknown} "
                 f"(valid: {sorted(real_params)})"
             )
+
+
+TRAINING_SCRIPT_PATHS = [
+    SCRIPTS_DIR / "train_kan.py",
+    SCRIPTS_DIR / "train_kan_top.py",
+    SCRIPTS_DIR / "train_kan_qg.py",
+    SCRIPTS_DIR / "train_rf.py",
+]
+
+
+def _calls_named(tree, name, *, with_attr=None):
+    calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            if func.attr == name and (with_attr is None or func.value.id == with_attr):
+                calls.append(node)
+        elif isinstance(func, ast.Name) and func.id == name:
+            calls.append(node)
+    return calls
+
+
+def test_training_runs_use_run_seed_while_preprocessors_use_split_seed():
+    for path in TRAINING_SCRIPT_PATHS:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        assert any(
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr == "set_seed"
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "workspace"
+            and len(call.args) == 1
+            and isinstance(call.args[0], ast.Attribute)
+            and call.args[0].attr == "seed"
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+        ), f"{path.name} should set the runtime RNG from args.seed"
+
+        assert any(
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr == "load_and_preprocess_data"
+            and any(
+                kw.arg == "seed" and isinstance(kw.value, ast.Attribute) and kw.value.attr == "seed"
+                for kw in call.keywords
+            )
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+        ), f"{path.name} should select the data subset using args.seed"
+
+    for path in (SCRIPTS_DIR.parent / "src" / "preprocessing" / "processor_top.py",
+                 SCRIPTS_DIR.parent / "src" / "preprocessing" / "processor_qg.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        set_seed_calls = _calls_named(tree, "set_seed")
+        assert any(
+            len(call.args) == 1
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "subset_split_seed"
+            for call in set_seed_calls
+        ), f"{path.name} should seed the canonical split with subset_split_seed"
+        assert any(
+            len(call.args) == 1
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "seed"
+            for call in set_seed_calls
+        ), f"{path.name} should restore the run-specific seed when selecting a subset"

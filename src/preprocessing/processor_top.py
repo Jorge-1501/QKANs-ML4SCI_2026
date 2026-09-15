@@ -243,7 +243,8 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
 # ============================================================================
 # ============================================================================
 
-def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, balance=False, apply_mass_cut=None):
+def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, 
+    balance=False, apply_mass_cut=None):
     """
     Processes separate train.h5, val.h5, and test.h5 files sequentially, then
     partitions each balanced split into n_subsets mutually disjoint, class-balanced
@@ -257,7 +258,6 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, balan
     raises RuntimeError instead of silently building it, so a --seed run can only
     ever select a subset, never construct one.
     """
-    set_seed(seed)
     config = get_config(task, seed)
     if apply_mass_cut is not None:
         config["apply_mass_cut"] = apply_mass_cut
@@ -271,7 +271,7 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, balan
     config["canonical_scaler_path"] = os.path.join(config["canonical_data_dir"], "global_scaler.pkl")
 
     n_subsets = config.get("n_subsets", 15)
-    subset_split_seed = config.get("subset_split_seed", 42)
+    subset_split_seed = config.get("subset_split_seed", 37)
     subset_id = seed % n_subsets
 
     DATA_DIR = Path(data_dir)
@@ -297,7 +297,7 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, balan
             with open(scaler_file, "rb") as f:
                 scaler = pickle.load(f)
             print(f">> Selecting subset {subset_id} (seed={seed} % n_subsets={n_subsets}).")
-            set_seed(seed)
+            set_seed(seed, purpose="run seed: subset selection")
             return (
                 cached_data['X_train_subsets'][subset_id], cached_data['y_train_subsets'][subset_id],
                 cached_data['X_val_subsets'][subset_id], cached_data['y_val_subsets'][subset_id],
@@ -320,7 +320,7 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, balan
     # --- STEP 2: SEQUENTIAL PROCESS (Train, Val, Test) -- builds the canonical
     # partition. Uses subset_split_seed (NOT seed) so the partition is stable
     # regardless of which seed later selects a subset from it. ---
-    set_seed(subset_split_seed)
+    set_seed(subset_split_seed, purpose="subset_split_seed: canonical partition build (hyperparams.py)")
 
     if task in ["top"]:
         raw_files = {
@@ -449,8 +449,9 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, balan
     print(f"\n[CACHE WRITTEN] Canonical {n_subsets}-way partition saved to: '{cache_file}'")
     print(f"Inference metrics scaler object written into workspace folder structures.")
 
-    print(f">> Selecting subset {subset_id} (seed={seed} % n_subsets={n_subsets}).")
-    set_seed(seed)
+    # force_process=True is build-only (reserved for run_preprocessing*.py), whose
+    # callers discard the returned subset -- selecting one via the run seed here
+    # would have no effect, so it is not seeded/printed in this branch.
     return (
         canonical_data['X_train_subsets'][subset_id], canonical_data['y_train_subsets'][subset_id],
         canonical_data['X_val_subsets'][subset_id], canonical_data['y_val_subsets'][subset_id],

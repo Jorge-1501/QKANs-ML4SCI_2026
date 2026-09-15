@@ -92,8 +92,8 @@ def get_hyperparams():
         # selects which chunk it trains on via seed % n_subsets; subset_split_seed
         # seeds ONLY the one-time canonical partition itself, decoupled from --seed,
         # so the partition is stable regardless of which seed later selects a subset.
-        "n_subsets": 1,
-        "subset_split_seed": 42,
+        "n_subsets": 5,
+        "subset_split_seed": 37,
 
         # ---------------------------
         # Random Forest Hyperparameters
@@ -123,7 +123,7 @@ def get_hyperparams():
         # Applied in processor_top._compute_physics_features. run_preprocessing.py
         # is the only caller allowed to override apply_mass_cut via CLI; every other
         # script (train_kan.py, train_kan_top.py, train_qkan.py, ...) uses this default.
-        "apply_mass_cut": False,
+        "apply_mass_cut": True,
         "mass_cut_lo": 145.0,
         "mass_cut_hi": 205.0,
     }

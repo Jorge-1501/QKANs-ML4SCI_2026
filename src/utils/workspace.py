@@ -18,8 +18,9 @@ def get_project_root():
     return Path(__file__).parent.parent.parent.resolve()
 
 # Set random seeds for reproducibility
-def set_seed(seed_value=42):
-    print(f"Setting global random seed {seed_value} for reproducibility.")
+def set_seed(seed_value=42, purpose=None):
+    suffix = f" ({purpose})" if purpose else ""
+    print(f"Setting global random seed {seed_value} for reproducibility{suffix}.")
     random.seed(seed_value)
     np.random.seed(seed_value)
     torch.manual_seed(seed_value)

@@ -191,10 +191,9 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
     raises RuntimeError instead of silently building it, so a --seed run can only
     ever select a subset, never construct one.
     """
-    set_seed(seed)
     config = get_config(task=task, seed=seed)
     n_subsets = config.get("n_subsets", 15)
-    subset_split_seed = config.get("subset_split_seed", 42)
+    subset_split_seed = config.get("subset_split_seed", 37)
     subset_id = seed % n_subsets
 
     DATA_DIR = Path(data_dir)
@@ -220,7 +219,7 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
             with open(scaler_file, "rb") as f:
                 scalers = pickle.load(f)
             print(f">> Selecting subset {subset_id} (seed={seed} % n_subsets={n_subsets}).")
-            set_seed(seed)
+            set_seed(seed, purpose="run seed: subset selection")
             return (
                 cached_data['X_train_subsets'][subset_id], cached_data['y_train_subsets'][subset_id],
                 cached_data['X_val_subsets'][subset_id], cached_data['y_val_subsets'][subset_id],
@@ -243,7 +242,7 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
     # --- STEP 2: SYNCHRONOUS LOAD AND SPLIT (WITH MULTIPLICITY CORRECTION) ---
     # Uses subset_split_seed (NOT seed) so the partition is stable regardless of
     # which seed later selects a subset from it.
-    set_seed(subset_split_seed)
+    set_seed(subset_split_seed, purpose="subset_split_seed: canonical partition build (hyperparams.py)")
     # Analytical list of .npz files from the simulated dataset (Pythia 8)
     npz_files = sorted(list(DATA_DIR.glob("QG_jets_fp32_*.npz")))
     if len(npz_files) == 0:
@@ -378,8 +377,9 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
     torch.save(canonical_data, cache_file)
     print(f"\n[CACHE WRITTEN] Canonical {n_subsets}-way partition saved to: '{cache_file}'")
 
-    print(f">> Selecting subset {subset_id} (seed={seed} % n_subsets={n_subsets}).")
-    set_seed(seed)
+    # force_process=True is build-only (reserved for run_preprocessing*.py), whose
+    # callers discard the returned subset -- selecting one via the run seed here
+    # would have no effect, so it is not seeded/printed in this branch.
     return (
         canonical_data['X_train_subsets'][subset_id], canonical_data['y_train_subsets'][subset_id],
         canonical_data['X_val_subsets'][subset_id], canonical_data['y_val_subsets'][subset_id],
