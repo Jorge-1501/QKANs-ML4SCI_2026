@@ -42,8 +42,9 @@ def main(args):
     workspace.make_dirs(CONFIG)
 
     # === Clone sys.stdout to log messages to both the console and a file ===
-    log_file_path = os.path.join(CONFIG["processed_data_dir"], f"training_seed_{args.seed}.log")
+    log_file_path = os.path.join(CONFIG["logs_dir"], f"training_seed_{args.seed}.log")
     sys.stdout = TeedLog(log_file_path)
+    workspace.write_hyperparams_snapshot(CONFIG, extra={"script": "train_kan_qg.py", "force": args.force})
     # ==================================
     
     start_time = time.time()

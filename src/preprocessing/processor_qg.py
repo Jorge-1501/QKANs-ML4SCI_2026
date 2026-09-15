@@ -255,7 +255,7 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
     max_m_global = 0
 
     # Fast first pass to extract data and identify the global max M in RAM
-    for file_path in npz_files[:3]:  # Strict local RAM control
+    for file_path in npz_files[:]:  # Strict local RAM control
         print(f"Loading into RAM: {file_path.name}")
         with np.load(file_path, 'r') as data:
             X_block = data['X'][:]

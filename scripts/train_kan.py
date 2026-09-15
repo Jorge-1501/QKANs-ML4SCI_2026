@@ -37,9 +37,10 @@ def main(args):
     CONFIG = workspace.get_config(task="top", seed=args.seed)
     workspace.make_dirs(CONFIG)
 
-    log_file_path = os.path.join(CONFIG["processed_data_dir"], f"training_seed_{args.seed}.log")
+    log_file_path = os.path.join(CONFIG["logs_dir"], f"training_seed_{args.seed}.log")
     sys.stdout = TeedLog(log_file_path)
-    
+    workspace.write_hyperparams_snapshot(CONFIG, extra={"script": "train_kan.py", "force": args.force})
+
     start_time = time.time()
     print(f"Starting the automated training pipeline. Seed: {args.seed}.")
 

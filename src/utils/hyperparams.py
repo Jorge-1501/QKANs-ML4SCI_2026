@@ -27,14 +27,14 @@ def get_hyperparams():
         "num_workers": 0,
 
         # --- Base Training Hyperparameters ---
-        "base_lr": 1e-2,
+        "base_lr": 5e-3,
         "base_epochs": 60,
-        "base_batch_size": 65536,
+        "base_batch_size": 4096,
         "base_patience": 7,
         "base_early_stop_delta": 1e-2,
         "base_lamb": 0.01,  # Regularization weight
-        "base_lamb_l1": 0.1,
-        "base_lamb_entropy": 0.5,
+        "base_lamb_l1": 0.05,
+        "base_lamb_entropy": 0.05,
         "base_lamb_coef": 0.005,
         "base_lamb_coefdiff": 0.01,
         "base_update_grid_freq": 60,
@@ -48,7 +48,7 @@ def get_hyperparams():
         # --- Re-training Hyperparameters ---
         "retrain_lr": 1e-3,
         "retrain_epochs": 20,
-        "retrain_batch_size": 16384,
+        "retrain_batch_size": 2048,
         "retrain_patience": 6,
         "retrain_early_stop_delta": 5e-5,
         "retrain_lamb_l1": 0.1,
@@ -61,16 +61,16 @@ def get_hyperparams():
         "symbolic_weight_simple": 0.5,
 
         # --- Fine-Tuning Hyperparameters ---
-        "finetune_lr": 1e-5,  # Lower learning rate
+        "finetune_lr": 5e-5,  # Lower learning rate
         "finetune_epochs": 15,
-        "finetune_batch_size": 512,
+        "finetune_batch_size": 2048,
         "finetune_patience": 5,
         "finetune_early_stop_delta": 1e-6,
 
         # ---------------------
         # QKAN Hyperparameters
         # ---------------------
-        "qkan_batch_size": 256,
+        "qkan_batch_size": 1024,
         "qkan_learning_rate": 5e-3,
         "qkan_epochs": 50,
         "qkan_patience": 8,
@@ -80,7 +80,9 @@ def get_hyperparams():
         "n_val_samples": 2000,
 
         # --- Chebyshev Extraction Hyperparameters ---
-        "chebyshev_r2_threshold": 0.95,
+        # Fixed degree every edge is fit at (no R2-gated search) -- see
+        # reports/AUC_test/ for why an R2-gated minimum-degree search was
+        # tried and reverted.
         "chebyshev_max_degree": 4,
         "qkan_dynamic_range_threshold": 1e-3,
 
@@ -93,6 +95,21 @@ def get_hyperparams():
         "n_subsets": 1,
         "subset_split_seed": 42,
 
+        # ---------------------------
+        # Random Forest Hyperparameters
+        # ---------------------------
+        # Fixed, tuned defaults (no in-script hyperparameter search) -- reused
+        # as-is by every seed/task run. random_state is intentionally NOT set
+        # here: RandomForestTrainer passes the run's own --seed (config["seed"])
+        # so the forest's internal randomness stays tied to the selected fold.
+        "rf_n_estimators": 500,
+        "rf_max_depth": None,
+        "rf_min_samples_split": 2,
+        "rf_min_samples_leaf": 1,
+        "rf_max_features": "sqrt",
+        "rf_class_weight": "balanced",
+        "rf_n_jobs": -1,
+
         # --- Symbolic-regression warm-up sample sizing ---
         # X_train_sample is drawn as `symbolic_sample_fraction` of a subset's own
         # train chunk; if that falls under `symbolic_sample_min_floor` (a 1/15 subset
@@ -101,4 +118,12 @@ def get_hyperparams():
         "symbolic_sample_fraction": 0.05,
         "symbolic_sample_min_floor": 500,
         "symbolic_sample_fallback_size": 5000,
+
+        # --- Top-tagging invariant-mass cut ---
+        # Applied in processor_top._compute_physics_features. run_preprocessing.py
+        # is the only caller allowed to override apply_mass_cut via CLI; every other
+        # script (train_kan.py, train_kan_top.py, train_qkan.py, ...) uses this default.
+        "apply_mass_cut": False,
+        "mass_cut_lo": 145.0,
+        "mass_cut_hi": 205.0,
     }

@@ -32,8 +32,14 @@ def main(args):
     workspace.make_dirs(CONFIG)
     print(f"Selected backend mode (Training): {args.train_backend} \n")
 
-    log_file_path = os.path.join(CONFIG["processed_data_dir"], f"train_qkan_{args.task}.log")
+    log_file_path = os.path.join(CONFIG["logs_dir"], f"train_qkan_{args.task}_seed_{args.seed}_{args.train_backend}.log")
     sys.stdout = TeedLog(log_file_path)
+    workspace.write_hyperparams_snapshot(CONFIG, extra={
+        "script": "train_qkan.py",
+        "task": args.task,
+        "train_backend": args.train_backend,
+        "force": args.force,
+    })
 
     # Load classical data
     X_train, y_train, X_val, y_val, X_test, y_test, X_sample, scaler = processor.load_and_preprocess_data(

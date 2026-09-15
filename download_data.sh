@@ -8,9 +8,9 @@
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Define immutable raw data paths according to the workspace design
-RAW_QG="$REPO_ROOT/data/raw/quark_gluon"
+RAW_QG="$REPO_ROOT/data/raw/quark-gluon"
 RAW_TOP="$REPO_ROOT/data/raw/top"
-RAW_HIGGS="$REPO_ROOT/data/raw/higgs_boson"
+RAW_HIGGS="$REPO_ROOT/data/raw/higgs-boson"
 
 # Step 1: Guarantee the structural integrity of the raw data directory trees
 mkdir -p "$RAW_QG"
