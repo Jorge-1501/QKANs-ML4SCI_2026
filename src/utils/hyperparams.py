@@ -33,8 +33,8 @@ def get_hyperparams():
         "base_patience": 7,
         "base_early_stop_delta": 1e-2,
         "base_lamb": 0.01,  # Regularization weight
-        "base_lamb_l1": 0.05,
-        "base_lamb_entropy": 0.05,
+        "base_lamb_l1": 0.01,
+        "base_lamb_entropy": 0.01,
         "base_lamb_coef": 0.005,
         "base_lamb_coefdiff": 0.01,
         "base_update_grid_freq": 60,
