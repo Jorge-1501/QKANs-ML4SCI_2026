@@ -78,9 +78,9 @@ def main(args):
     print("\n--- Step 2: Training Random Forest ---")
     rf_model_path = CONFIG["rf_model_path"]
 
-    if os.path.exists(rf_model_path) and not args.force:
+    rf_trained_this_run = args.force or not os.path.exists(rf_model_path)
+    if not rf_trained_this_run:
         print(f"Random Forest model found at {rf_model_path}. Skipping training.")
-        trainer.load_checkpoint(rf_model_path)
     else:
         trainer.train_rf_model(
             X_train=X_train_np,
@@ -88,35 +88,39 @@ def main(args):
             model_save_path=rf_model_path
         )
 
-        print("\n--- Evaluation of Random Forest Model ---")
-        model, eval_data, metrics = trainer.evaluate_rf_model(
-            model_save_path=rf_model_path,
-            X_test=X_test_np,
-            y_test=y_test_np,
-            conf_matrix_save_path=CONFIG["rf_eval_cm"],
-            conf_matrix_normalized_save_path=CONFIG["rf_eval_cm_normalized"],
-            save_path_roc_curve=CONFIG["rf_eval_roc"],
-            save_path_pr_curve=CONFIG["rf_eval_pr"]
-        )
+    # Evaluation always runs, even when training was skipped this run, so the
+    # metrics JSON/probability arrays feeding scripts/collect_metrics.py never
+    # go stale relative to a --force-free re-run (evaluate_rf_model loads the
+    # checkpoint from disk itself -- only training is worth skipping).
+    print("\n--- Evaluation of Random Forest Model ---")
+    model, eval_data, metrics = trainer.evaluate_rf_model(
+        model_save_path=rf_model_path,
+        X_test=X_test_np,
+        y_test=y_test_np,
+        conf_matrix_save_path=CONFIG["rf_eval_cm"],
+        conf_matrix_normalized_save_path=CONFIG["rf_eval_cm_normalized"],
+        save_path_roc_curve=CONFIG["rf_eval_roc"],
+        save_path_pr_curve=CONFIG["rf_eval_pr"]
+    )
 
-        np.save(CONFIG["rf_eval_data_true"], eval_data[0])
-        np.save(CONFIG["rf_eval_data_probs"], eval_data[1])
-        np.save(CONFIG["rf_eval_data_binary"], eval_data[2])
+    np.save(CONFIG["rf_eval_data_true"], eval_data[0])
+    np.save(CONFIG["rf_eval_data_probs"], eval_data[1])
+    np.save(CONFIG["rf_eval_data_binary"], eval_data[2])
 
-        pipeline_total_time = time.time() - start_time
-        metrics['total_pipeline_time_seconds'] = pipeline_total_time
+    pipeline_total_time = time.time() - start_time
+    metrics['total_pipeline_time_seconds'] = pipeline_total_time
 
-        with open(CONFIG["rf_eval_metrics"], 'w') as f:
-            json.dump(metrics, f, indent=4)
+    with open(CONFIG["rf_eval_metrics"], 'w') as f:
+        json.dump(metrics, f, indent=4)
 
-        print("\n--- Feature Importance Report ---")
-        trainer.feature_importance_report(
-            feature_names=CONFIG["features"],
-            save_path_plot=CONFIG["rf_feature_importance_plot"],
-            save_path_json=CONFIG["rf_feature_importance_data"]
-        )
+    print("\n--- Feature Importance Report ---")
+    trainer.feature_importance_report(
+        feature_names=CONFIG["features"],
+        save_path_plot=CONFIG["rf_feature_importance_plot"],
+        save_path_json=CONFIG["rf_feature_importance_data"]
+    )
 
-        print(f"\nRandom Forest pipeline completed in {pipeline_total_time:.2f} seconds.")
+    print(f"\nRandom Forest pipeline completed in {pipeline_total_time:.2f} seconds.")
 
 
 if __name__ == "__main__":

@@ -309,6 +309,7 @@ class ClassicKANTrainer:
         test_precision = precision_score(test_true, test_preds_binary)
         test_recall = recall_score(test_true, test_preds_binary)
         conf_matrix = confusion_matrix(test_true, test_preds_binary)
+        efficiency_metrics = viz.compute_efficiency_metrics(test_true, test_preds_probs)
 
         # --- Print Final Metrics ---
         # Now using the metadata loaded from the file
@@ -334,6 +335,7 @@ class ClassicKANTrainer:
             "Test AUC": test_auc, "Test Precision": test_precision, "Test Recall": test_recall,
             "Confusion Matrix": conf_matrix.tolist()
         }
+        metrics.update(efficiency_metrics)
 
         return self.model, (test_true, test_preds_probs, test_preds_binary), metrics
 

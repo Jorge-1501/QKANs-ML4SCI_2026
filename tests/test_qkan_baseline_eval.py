@@ -61,6 +61,9 @@ def _make_trainer(tmp_path, monkeypatch, train_backend="ideal"):
             cm_normalized_key = f"cm_qkan{suffix}_{backend}_normalized"
             path = tmp_path / f"{cm_normalized_key}.png"
             config[cm_normalized_key] = str(path)
+            for eval_data_kind in ("true", "probs", "binary"):
+                key = f"qkan_eval_data_{eval_data_kind}{suffix}_{backend}"
+                config[key] = str(tmp_path / f"{key}.npy")
     trainer.config = config
     return trainer
 

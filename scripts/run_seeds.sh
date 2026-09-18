@@ -22,11 +22,13 @@ if [ -z "$PIPELINE_BACKGROUNDED" ]; then
     exit 0
 fi
 
-#echo "[1/2] Preprocessing top-tagging data (split and mass cut)..."
-# We run preprocessing with --force once to ensure the 'no_mass_cut' canonical
-# partition is fully built if it doesn't exist yet, as training scripts only select
-# from prebuilt partitions.
-#python3 scripts/run_preprocessing.py  --force
+echo "[1/2] Preprocessing top-tagging data (no invariant-mass cut)..."
+# We run preprocessing with --no-mass-cut --force once to ensure the
+# 'no_mass_cut' canonical partition genuinely exists/is rebuilt under that
+# regime -- previously this call was commented out, so the header's
+# apply_mass_cut=False claim was not actually enforced (training scripts just
+# reused whatever canonical partition happened to already be on disk).
+python3 scripts/run_preprocessing.py --no-mass-cut --force
 
 for SEED in {13..14}; do
     echo "========================================================================"
@@ -43,4 +45,7 @@ for SEED in {13..14}; do
     echo "FINISHED PIPELINE RUN FOR SEED: ${SEED} ($(date))"
     echo "========================================================================"
 done
+
+echo "[3/3] Refreshing the aggregate metrics table..."
+python3 scripts/collect_metrics.py --task top
 

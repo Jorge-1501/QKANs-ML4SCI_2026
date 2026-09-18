@@ -73,17 +73,17 @@ def main(args):
     q_trainer.model.plot_circuit(CONFIG.get("circuit_plot", os.path.join(CONFIG["plots_dir"], "quantum-circuit.png")))
 
     # Baseline evaluation: warm-started QKAN BEFORE any quantum fine-tuning, on
-    # both ideal and noisy backends, to measure how much predictive signal
+    # all three simulation backends, to measure how much predictive signal
     # survives the classical->quantum extraction alone.
-    for backend in ("ideal", "noisy"):
+    for backend in ("ideal", "noisy", "shots"):
         q_trainer.evaluate_baseline(X_test, y_test, eval_backend=backend)
 
     # Quantum optimization loop (trains on args.train_backend, e.g. 'ideal')
     history = q_trainer.fit(X_train, y_train, X_val, y_val, resume=True, force=args.force)
 
-    # Final evaluation AFTER training, on both ideal and noisy backends, so the
-    # baseline/final x ideal/noisy grid can be compared directly.
-    for backend in ("ideal", "noisy"):
+    # Final evaluation AFTER training, on all three backends, so the
+    # baseline/final x ideal/noisy/shots grid can be compared directly.
+    for backend in ("ideal", "noisy", "shots"):
         q_trainer.evaluate(X_test, y_test, eval_backend=backend)
 
 if __name__ == "__main__":

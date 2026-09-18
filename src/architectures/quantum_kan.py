@@ -231,12 +231,24 @@ class QuantumKANTrainer:
         # *_baseline_{eval_backend} config keys instead of the plain ones (see
         # evaluate_baseline()), so pre- and post-training metrics never collide.
         import src.utils.metrics as viz
+        efficiency_metrics = viz.compute_efficiency_metrics(test_true, test_probs)
         suffix = "_baseline" if baseline else ""
         viz.plot_roc_curve(test_true, test_probs, save_path=self.config[f"roc_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix_normalized(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}_normalized"])
         viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config[f"pr_qkan{suffix}_{eval_backend}"])
         metrics_path = self.config[f"metrics_qkan{suffix}_{eval_backend}"]
+
+        import os
+        os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+
+        # Persist raw probabilities/labels too, mirroring the {stage}_eval_data_*
+        # convention ClassicKANTrainer/RandomForestTrainer already use -- needed
+        # for any downstream analysis (e.g. re-deriving efficiency/rejection at
+        # other working points) beyond what's baked into metrics_dic.
+        np.save(self.config[f"qkan_eval_data_true{suffix}_{eval_backend}"], test_true)
+        np.save(self.config[f"qkan_eval_data_probs{suffix}_{eval_backend}"], test_probs)
+        np.save(self.config[f"qkan_eval_data_binary{suffix}_{eval_backend}"], test_preds_binary)
 
         metrics_dic = {
             "Backend": eval_backend,
@@ -250,9 +262,9 @@ class QuantumKANTrainer:
             "Test Loss": test_loss,
             "Confusion Matrix": cm.tolist()
         }
+        metrics_dic.update(efficiency_metrics)
 
-        import os, json
-        os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+        import json
         with open(metrics_path, 'w') as f:
             json.dump(metrics_dic, f, indent=4)
 
