@@ -261,6 +261,16 @@ def get_config(task, seed):
         "qkan_eval_data_probs_baseline_shots": os.path.join(outputs_dir, "results", "qkan", "shots", "baseline", "qkan_eval_probs_baseline_shots.npy"),
         "qkan_eval_data_binary_baseline_shots": os.path.join(outputs_dir, "results", "qkan", "shots", "baseline", "qkan_eval_binary_baseline_shots.npy"),
 
+        # Reports - QKAN evaluation - Random VQC init ablation (Ideal only)
+        "roc_qkan_random_ideal": os.path.join(outputs_dir, "plots", "qkan", "ideal", "random", "roc_qkan_random_ideal.png"),
+        "pr_qkan_random_ideal": os.path.join(outputs_dir, "plots", "qkan", "ideal", "random", "pr_qkan_random_ideal.png"),
+        "cm_qkan_random_ideal": os.path.join(outputs_dir, "plots", "qkan", "ideal", "random", "cm_qkan_random_ideal.png"),
+        "cm_qkan_random_ideal_normalized": os.path.join(outputs_dir, "plots", "qkan", "ideal", "random", "cm_qkan_random_ideal_normalized.png"),
+        "metrics_qkan_random_ideal": os.path.join(outputs_dir, "results", "qkan", "ideal", "random", "metrics_qkan_random_ideal.json"),
+        "history_random_ideal_loss": os.path.join(outputs_dir, "results", "qkan", "ideal", "random", "history_loss.json"),
+        "history_random_ideal_loss_plot": os.path.join(outputs_dir, "plots", "qkan", "ideal", "random", "history_loss.png"),
+        "history_random_ideal_auc_plot": os.path.join(outputs_dir, "plots", "qkan", "ideal", "random", "history_auc.png"),
+
         "init_weights": os.path.join(data_out_dir, "quantum_weights"),
 
         # Quantum model and weights
@@ -274,6 +284,7 @@ def get_config(task, seed):
         "qkan_noisy_path": os.path.join(data_out_dir, "quantum_weights", "qkan_noisy.pth"),
         "qkan_ideal_path": os.path.join(data_out_dir, "quantum_weights", "qkan_ideal.pth"),
         "qkan_shots_path": os.path.join(data_out_dir, "quantum_weights", "qkan_shots.pth"),
+        "qkan_random_ideal_path": os.path.join(data_out_dir, "quantum_weights", "qkan_random_ideal.pth"),
 
         # ----------------------------------
         # --- Random Forest baseline paths ---

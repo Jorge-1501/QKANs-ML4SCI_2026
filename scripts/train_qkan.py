@@ -32,14 +32,19 @@ def main(args):
     workspace.make_dirs(CONFIG)
     print(f"Selected backend mode (Training): {args.train_backend} \n")
 
-    log_file_path = os.path.join(CONFIG["logs_dir"], f"train_qkan_{args.task}_seed_{args.seed}_{args.train_backend}.log")
+    log_suffix = "random_init" if args.random_init else args.train_backend
+    log_file_path = os.path.join(CONFIG["logs_dir"], f"train_qkan_{args.task}_seed_{args.seed}_{log_suffix}.log")
     sys.stdout = TeedLog(log_file_path)
     workspace.write_hyperparams_snapshot(CONFIG, extra={
         "script": "train_qkan.py",
         "task": args.task,
         "train_backend": args.train_backend,
+        "random_init": args.random_init,
         "force": args.force,
     })
+
+    if args.random_init:
+        workspace.set_seed(args.seed, purpose="random VQC init")
 
     # Load classical data
     X_train, y_train, X_val, y_val, X_test, y_test, X_sample, scaler = processor.load_and_preprocess_data(
@@ -67,10 +72,18 @@ def main(args):
         print(f"Initial Weights exist in {output_weights_path}. Skipping extraction.")
 
     # Quantum Initialization and Training
-    q_trainer = QuantumKANTrainer(CONFIG, train_backend=args.train_backend)
-    
+    train_backend = "ideal" if args.random_init else args.train_backend
+    q_trainer = QuantumKANTrainer(CONFIG, train_backend=train_backend, random_init=args.random_init)
+
     # Plot the dynamically generated circuit before training
     q_trainer.model.plot_circuit(CONFIG.get("circuit_plot", os.path.join(CONFIG["plots_dir"], "quantum-circuit.png")))
+
+    if args.random_init:
+        # Random-VQC-init ablation: no classical warm start to baseline
+        # against, and ideal backend only.
+        history = q_trainer.fit(X_train, y_train, X_val, y_val, resume=True, force=args.force)
+        q_trainer.evaluate(X_test, y_test, eval_backend="ideal", random_init=True)
+        return
 
     # Baseline evaluation: warm-started QKAN BEFORE any quantum fine-tuning, on
     # all three simulation backends, to measure how much predictive signal
@@ -94,6 +107,9 @@ if __name__ == "__main__":
     # 'noisy' backends, before AND after training (4 evaluations total).
     parser.add_argument('--force', action='store_true', help='Force extraction and retraining')
     parser.add_argument('--task', type=str, choices=['top', 'quark-gluon'], default='top')
+    parser.add_argument('--random_init', action='store_true',
+                         help='Initialize the VQC with random weights instead of the '
+                              'KAN-extracted warm start. Ideal backend only.')
     args = parser.parse_args()
     
     try:

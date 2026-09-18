@@ -26,6 +26,7 @@ METRIC_REGISTRY = {
     "qkan_baseline_ideal": "metrics_qkan_baseline_ideal",
     "qkan_baseline_noisy": "metrics_qkan_baseline_noisy",
     "qkan_baseline_shots": "metrics_qkan_baseline_shots",
+    "qkan_random_ideal": "metrics_qkan_random_ideal",
     "random_forest": "rf_eval_metrics",
 }
 

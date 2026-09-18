@@ -15,16 +15,17 @@ sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from src.architectures.qkan_model import QKANModel
 
 class QuantumKANTrainer:
-    def __init__(self, config, train_backend="ideal"):
+    def __init__(self, config, train_backend="ideal", random_init=False):
         self.config = config
         self.train_backend = train_backend
+        self.random_init = random_init
         # Use all available CPU cores for the classical-side work (loss,
         # optimizer, grad clipping) instead of an artificial fixed cap.
         torch.set_num_threads(max(1, os.cpu_count() or 1))
-        
+
         # Initialize the model pointing to the unified .pt file
         weights_path = os.path.join(self.config["polynomial_weights_dir"], "quantum_weights.pt")
-        self.model = QKANModel(graph_path=weights_path, backend_mode=train_backend)
+        self.model = QKANModel(graph_path=weights_path, backend_mode=train_backend, random_init=random_init)
         
         self.criterion = nn.BCEWithLogitsLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.get("qkan_learning_rate", 5e-3))
@@ -34,15 +35,16 @@ class QuantumKANTrainer:
         self._setup_backend_paths()
 
     def _setup_backend_paths(self):
+        prefix = "random_" if self.random_init else ""
         if self.train_backend == "noisy":
-            self.save_path = self.config["qkan_noisy_path"]
-            self.history_path = self.config["history_noisy_loss"]
+            self.save_path = self.config[f"qkan_{prefix}noisy_path"]
+            self.history_path = self.config[f"history_{prefix}noisy_loss"]
         elif self.train_backend == "shots":
-            self.save_path = self.config["qkan_shots_path"]
-            self.history_path = self.config["history_shots_loss"]
+            self.save_path = self.config[f"qkan_{prefix}shots_path"]
+            self.history_path = self.config[f"history_{prefix}shots_loss"]
         else:
-            self.save_path = self.config["qkan_ideal_path"]
-            self.history_path = self.config["history_ideal_loss"]
+            self.save_path = self.config[f"qkan_{prefix}ideal_path"]
+            self.history_path = self.config[f"history_{prefix}ideal_loss"]
 
     def fit(self, X_train, y_train, X_val, y_val, resume=True, force=False):
         if os.path.exists(self.save_path) and resume and not force:
@@ -146,7 +148,7 @@ class QuantumKANTrainer:
             json.dump(history, f, indent=4)
         return history
 
-    def evaluate(self, X_test, y_test, eval_backend="noisy", baseline=False):
+    def evaluate(self, X_test, y_test, eval_backend="noisy", baseline=False, random_init=False):
         """
         Evaluate the quantum model on the test set.
         Allows changing the simulation backend specifically for evaluation.
@@ -158,6 +160,9 @@ class QuantumKANTrainer:
               "Baseline": True. Used by evaluate_baseline() to keep pre-training
               (warm-start-only) metrics separate from post-training ones, so
               both can be compared side by side.
+            - random_init (bool): if True, routes plots/metrics to the
+              *_random_{eval_backend} config paths instead, for the
+              random-VQC-init ablation (see QKANModel's random_init flag).
         """
         print(f"\n" + "="*50)
         print(f"[Q-Trainer] {'Baseline ' if baseline else ''}Evaluating QKAN on the test set. Backend: '{eval_backend}'")
@@ -231,8 +236,7 @@ class QuantumKANTrainer:
         # *_baseline_{eval_backend} config keys instead of the plain ones (see
         # evaluate_baseline()), so pre- and post-training metrics never collide.
         import src.utils.metrics as viz
-        efficiency_metrics = viz.compute_efficiency_metrics(test_true, test_probs)
-        suffix = "_baseline" if baseline else ""
+        suffix = ("_baseline" if baseline else "") + ("_random" if random_init else "")
         viz.plot_roc_curve(test_true, test_probs, save_path=self.config[f"roc_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix_normalized(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}_normalized"])
@@ -253,6 +257,7 @@ class QuantumKANTrainer:
         metrics_dic = {
             "Backend": eval_backend,
             "Baseline": baseline,
+            "Random Init": random_init,
             "Eval Time (s)": eval_time,
             "Test AUC": test_auc,
             "Test Accuracy": test_acc,

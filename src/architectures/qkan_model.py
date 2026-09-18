@@ -37,7 +37,7 @@ class QKANModel(nn.Module):
     the QKAN paper).
     """
 
-    def __init__(self, graph_path, backend_mode="ideal"):
+    def __init__(self, graph_path, backend_mode="ideal", random_init=False):
         super().__init__()
 
         if not os.path.exists(graph_path):
@@ -119,14 +119,25 @@ class QKANModel(nn.Module):
         # Trainable parameters (one per edge/transfer, shape (degree+1,)
         # for re-uploading edges, scalar for IsingZZ/output)
         # ------------------------------------------------------------
-        self.edge_weights = nn.Parameter(
-            torch.stack([torch.tensor(e["coefs"], dtype=torch.float32) for e in edge_table])
-            if edge_table else torch.zeros((0, self.degree + 1))
-        )
+        if random_init:
+            print("[QKAN] Random init: ignoring KAN-extracted coefficients, "
+                  "drawing edge/output weights from a standard normal instead.")
+            self.edge_weights = nn.Parameter(
+                torch.randn((len(edge_table), self.degree + 1), dtype=torch.float32)
+                if edge_table else torch.zeros((0, self.degree + 1))
+            )
+            self.output_weights = nn.Parameter(
+                torch.randn((len(output_table), self.degree + 1), dtype=torch.float32)
+            )
+        else:
+            self.edge_weights = nn.Parameter(
+                torch.stack([torch.tensor(e["coefs"], dtype=torch.float32) for e in edge_table])
+                if edge_table else torch.zeros((0, self.degree + 1))
+            )
+            self.output_weights = nn.Parameter(
+                torch.stack([torch.tensor(o["coefs"], dtype=torch.float32) for o in output_table])
+            )
         self.zz_weights = nn.Parameter(torch.zeros(len(zz_table)))
-        self.output_weights = nn.Parameter(
-            torch.stack([torch.tensor(o["coefs"], dtype=torch.float32) for o in output_table])
-        )
 
         self.backend_mode = backend_mode
         self.dev = self._initialize_device()
