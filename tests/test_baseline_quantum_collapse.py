@@ -22,29 +22,40 @@ import pytest
 import torch
 
 from src.architectures.qkan_model import QKANModel
+from src.utils import workspace
 
 ROOT = Path(__file__).parent.parent.resolve()
 FORWARD_BATCH_SIZE = 32
 
 
-def _canonical_subsets_path():
-    return ROOT / "data" / "processed" / "top" / "canonical" / "mass_cut" / "preprocessed_subsets.pt"
+def _config(seed):
+    """Paths come from workspace.get_config (the default mass-cut / n_subsets regime the
+    investigation was run under) instead of being rebuilt by hand."""
+    return workspace.get_config("top", seed)
+
+
+def _canonical_subsets_path(seed):
+    return Path(_config(seed)["canonical_cache_file"])
 
 
 def _graph_path(seed):
-    return ROOT / "data" / "processed" / "top" / f"seed_{seed}" / "quantum_weights" / "quantum_weights.pt"
+    return Path(_config(seed)["polynomial_weights_dir"]) / "quantum_weights.pt"
 
 
 def _chebyshev_report_path(seed):
-    return ROOT / "outputs" / "top" / f"seed_{seed}" / "results" / "chebyshev_coefficients.txt"
+    return Path(_config(seed)["Chebyshev_coefficients_path"])
 
 
 def _baseline_metrics_paths():
-    return sorted(ROOT.glob("outputs/top/seed_*/results/qkan/*/baseline/metrics_qkan_baseline_*.json"))
+    return sorted(
+        path
+        for run in workspace.iter_run_dirs("top")
+        for path in run["path"].glob("results/qkan/*/baseline/metrics_qkan_baseline_*.json")
+    )
 
 
 def _history_loss_path(seed, backend="ideal"):
-    return ROOT / "outputs" / "top" / f"seed_{seed}" / "results" / "qkan" / backend / "history_loss.json"
+    return Path(_config(seed)[f"history_{backend}_loss"])
 
 
 @pytest.mark.parametrize("seed", [3, 10])
@@ -54,7 +65,7 @@ def test_baseline_forward_pass_is_biased_toward_one_class(seed):
     nearly every sample because sigmoid([-1,1]) is compressed to
     [0.269, 0.731]. Forward-only, no gradients, batch capped at 32 rows."""
     graph_path = _graph_path(seed)
-    subsets_path = _canonical_subsets_path()
+    subsets_path = _canonical_subsets_path(seed)
     if not graph_path.exists() or not subsets_path.exists():
         pytest.skip(f"cached artifacts for seed {seed} not present in this checkout")
 

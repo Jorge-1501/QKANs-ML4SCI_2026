@@ -176,7 +176,7 @@ def _compute_qg_physics_features(X, y, config, fit_scalers=True, scaler_dict=Non
 
     return processed_matrix, scaler_dict
 
-def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
+def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, full_dataset=False):
     """
     Sequential pipeline orchestrator for loading structured Quark-Gluon data.
     Iteratively processes .npz files, class-balances each split, then partitions
@@ -190,11 +190,16 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False):
     scripts) must find an existing cache; a cache miss with force_process=False
     raises RuntimeError instead of silently building it, so a --seed run can only
     ever select a subset, never construct one.
+
+    full_dataset=True forces n_subsets=1: the entire dataset, unpartitioned
+    (train/val/test stay separate splits). workspace.get_config resolves the regime
+    and picks the canonical cache directory (data/processed/<task>/<full|n{N}>/).
+    Quark-gluon has no invariant-mass cut, so only n_subsets is affected.
     """
-    config = get_config(task=task, seed=seed)
-    n_subsets = config.get("n_subsets", 15)
+    config = get_config(task=task, seed=seed, full_dataset=full_dataset)
+    n_subsets = config["n_subsets"]
     subset_split_seed = config.get("subset_split_seed", 37)
-    subset_id = seed % n_subsets
+    subset_id = config["subset_id"]
 
     DATA_DIR = Path(data_dir)
     canonical_dir = Path(config["canonical_data_dir"])

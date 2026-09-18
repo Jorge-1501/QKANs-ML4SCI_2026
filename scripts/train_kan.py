@@ -34,7 +34,7 @@ def main(args):
     torch.set_num_threads(4)
     workspace.set_seed(args.seed)
     
-    CONFIG = workspace.get_config(task="top", seed=args.seed)
+    CONFIG = workspace.get_config(task="top", seed=args.seed, full_dataset=args.full_dataset)
     workspace.make_dirs(CONFIG)
 
     log_file_path = os.path.join(CONFIG["logs_dir"], f"training_seed_{args.seed}.log")
@@ -56,7 +56,8 @@ def main(args):
         data_dir=top_path,
         task=CONFIG["task"],
         seed=args.seed,
-        force_process=False
+        force_process=False,
+        full_dataset=args.full_dataset
     )
 
     del top_path
@@ -359,6 +360,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Automated KAN Training Pipeline")
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     parser.add_argument("--force", action='store_true', help='Overwrite existing models')
+    parser.add_argument("--full-dataset", dest="full_dataset", action="store_true",
+                        help="Use the entire dataset: forces no mass cut and n_subsets=1 (train/val/test stay separate). "
+                             "Reads/writes the no_mass_cut/full variant directories. Default: off.")
     args = parser.parse_args()
     
     try:
@@ -366,3 +370,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nFatal error: {e}")
         traceback.print_exc()
+        sys.exit(1)

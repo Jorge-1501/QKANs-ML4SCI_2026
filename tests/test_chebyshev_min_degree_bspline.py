@@ -109,7 +109,7 @@ def evaluate_graph(graph, graph_path, seed):
     model.eval()
 
     _, _, _, _, X_test, y_test, _, _ = processor.load_and_preprocess_data(
-        data_dir=os.path.join("data", "raw", "top"), task="top", seed=seed, force_process=False
+        data_dir=os.path.join(workspace.get_config("top", seed)["raw_data_dir"], "top"), task="top", seed=seed, force_process=False
     )
 
     with torch.no_grad():

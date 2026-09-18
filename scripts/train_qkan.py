@@ -9,6 +9,10 @@ sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from src.utils import workspace
 from src.architectures.extractor import SymbolicWarmStartExtractor
 from src.architectures.quantum_kan import QuantumKANTrainer
+import src.preprocessing.processor_top as processor_top
+import src.preprocessing.processor_qg as processor_qg
+
+PROCESSORS = {"top": processor_top, "quark-gluon": processor_qg}
 
 class TeedLog:
     """Clone sys.stdout to log messages to both the console and a file."""
@@ -26,9 +30,8 @@ class TeedLog:
 
 def main(args):
     # Configuration and workspace setup
-    CONFIG = workspace.get_config(task=args.task, seed=args.seed)
-    if args.task == "top":
-        import src.preprocessing.processor_top as processor
+    CONFIG = workspace.get_config(task=args.task, seed=args.seed, full_dataset=args.full_dataset)
+    processor = PROCESSORS[args.task]
     workspace.make_dirs(CONFIG)
     print(f"Selected backend mode (Training): {args.train_backend} \n")
 
@@ -48,10 +51,11 @@ def main(args):
 
     # Load classical data
     X_train, y_train, X_val, y_val, X_test, y_test, X_sample, scaler = processor.load_and_preprocess_data(
-        data_dir=os.path.join("data", "raw", args.task),
+        data_dir=os.path.join(CONFIG["raw_data_dir"], args.task),
         task=args.task,
         force_process=False,
-        seed=args.seed
+        seed=args.seed,
+        full_dataset=args.full_dataset
     )
 
     # Automatic Extraction (Agnostic Warm-Start)
@@ -107,6 +111,9 @@ if __name__ == "__main__":
     # 'noisy' backends, before AND after training (4 evaluations total).
     parser.add_argument('--force', action='store_true', help='Force extraction and retraining')
     parser.add_argument('--task', type=str, choices=['top', 'quark-gluon'], default='top')
+    parser.add_argument("--full-dataset", dest="full_dataset", action="store_true",
+                        help="Use the entire dataset: forces no mass cut and n_subsets=1 (train/val/test stay separate). "
+                             "Must match the regime the classical KAN was trained under. Default: off.")
     parser.add_argument('--random_init', action='store_true',
                          help='Initialize the VQC with random weights instead of the '
                               'KAN-extracted warm start. Ideal backend only.')
@@ -117,3 +124,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"A fatal error occurred: {e}")
         traceback.print_exc()
+        sys.exit(1)

@@ -236,6 +236,7 @@ class QuantumKANTrainer:
         # *_baseline_{eval_backend} config keys instead of the plain ones (see
         # evaluate_baseline()), so pre- and post-training metrics never collide.
         import src.utils.metrics as viz
+        efficiency_metrics = viz.compute_efficiency_metrics(test_true, test_probs)
         suffix = ("_baseline" if baseline else "") + ("_random" if random_init else "")
         viz.plot_roc_curve(test_true, test_probs, save_path=self.config[f"roc_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}"])

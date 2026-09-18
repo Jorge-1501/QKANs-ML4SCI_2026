@@ -38,7 +38,7 @@ def main(args):
     torch.set_num_threads(4)  # Limit PyTorch to use 4 CPU threads for data loading and processing
     workspace.set_seed(args.seed)
     
-    CONFIG = workspace.get_config(task="quark-gluon", seed=args.seed)
+    CONFIG = workspace.get_config(task="quark-gluon", seed=args.seed, full_dataset=args.full_dataset)
     workspace.make_dirs(CONFIG)
 
     # === Clone sys.stdout to log messages to both the console and a file ===
@@ -63,7 +63,8 @@ def main(args):
                                         data_dir=qg_path,
                                         task=CONFIG["task"],
                                         seed=args.seed,
-                                        force_process=False
+                                        force_process=False,
+                                        full_dataset=args.full_dataset
                                     )
     del qg_path
     gc.collect()
@@ -384,6 +385,9 @@ if __name__ == "__main__":
                         default=42, 
                         help='Random seed for reproducibility')
     parser.add_argument("--force", action='store_true', help='Overwrite existing models')
+    parser.add_argument("--full-dataset", dest="full_dataset", action="store_true",
+                        help="Use the entire dataset: forces n_subsets=1 (train/val/test stay separate; "
+                             "quark-gluon has no mass cut). Reads/writes the 'full' variant directories. Default: off.")
     args = parser.parse_args()
     try:
         main(args)
@@ -391,3 +395,4 @@ if __name__ == "__main__":
         print(f"\nFatal error: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)

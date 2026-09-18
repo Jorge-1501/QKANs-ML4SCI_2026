@@ -1,7 +1,8 @@
 # scripts/collect_metrics.py
 # Collects the per-run/per-stage metrics JSON files already written across every
-# outputs/<task>/seed_*/ directory into one long-format Parquet table, tagged by
-# task/seed/subset_id/model.
+# outputs/<task>/**/seed_*/ run directory into one long-format Parquet table, tagged by
+# task/seed/variant/subset_id/model. The table is task-level (variant-independent);
+# filter on its `variant` column to select one data regime.
 import argparse
 import os
 import sys
@@ -15,8 +16,7 @@ from src.utils.reporting import compute_run_statistics
 def main(args):
     df = compute_run_statistics(args.task)
 
-    config = workspace.get_config(args.task, seed=0)
-    out_path = config["metrics_table_path"]
+    out_path = workspace.get_config(args.task, seed=0)["metrics_table_path"]
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     df.to_parquet(out_path, index=False)
 
