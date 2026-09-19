@@ -93,7 +93,7 @@ def get_hyperparams():
         # seeds ONLY the one-time canonical partition itself, decoupled from --seed,
         # so the partition is stable regardless of which seed later selects a subset.
         "n_subsets": 5,
-        "subset_split_seed": 37,
+        "subset_split_seed": 42,
 
         # ---------------------------
         # Random Forest Hyperparameters
@@ -102,11 +102,11 @@ def get_hyperparams():
         # as-is by every seed/task run. random_state is intentionally NOT set
         # here: RandomForestTrainer passes the run's own --seed (config["seed"])
         # so the forest's internal randomness stays tied to the selected fold.
-        "rf_n_estimators": 500,
-        "rf_max_depth": None,
-        "rf_min_samples_split": 2,
-        "rf_min_samples_leaf": 1,
-        "rf_max_features": "sqrt",
+        "rf_n_estimators": 300,
+        "rf_max_depth": 35,
+        "rf_min_samples_split": 10,
+        "rf_min_samples_leaf": 5,
+        "rf_max_features": 0.35,
         "rf_class_weight": "balanced",
         "rf_n_jobs": -1,
 

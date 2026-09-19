@@ -65,7 +65,8 @@ def main(args):
         full_dataset=args.full_dataset
     )
 
-    # sklearn expects numpy arrays, not torch tensors
+    # sklearn expects numpy arrays, not torch tensors. Implement GPU if there of available. 
+    # An agnostic conversion from torch tensors to numpy arrays is performed below.
     X_train_np = X_train.cpu().numpy()
     y_train_np = y_train.cpu().numpy().ravel()
     X_test_np = X_test.cpu().numpy()
