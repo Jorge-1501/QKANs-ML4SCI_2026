@@ -17,7 +17,7 @@ mkdir -p "$RAW_QG"
 mkdir -p "$RAW_TOP"
 mkdir -p "$RAW_HIGGS"
 
-echo "🚀 System dependencies validation..."
+echo "System dependencies validation..."
 echo "--------------------------------------------------"
 
 # Step 2: Runtime Dependency enforcement (aria2 and unzip checking)
@@ -26,16 +26,16 @@ if ! command -v aria2c &> /dev/null; then MISSING_DEPS+=("aria2"); fi
 if ! command -v unzip &> /dev/null; then MISSING_DEPS+=("unzip"); fi
 
 if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
-    echo "🔍 Missing required tools: ${MISSING_DEPS[*]}. Installing..."
+    echo "Missing required tools: ${MISSING_DEPS[*]}. Installing..."
     sudo apt update && sudo apt install -y ${MISSING_DEPS[@]}
     if [ $? -ne 0 ]; then
-        echo "❌ Automated setup failed. Please install dependencies manually."
+        echo "Automated setup failed. Please install dependencies manually."
         exit 1
     fi
 fi
 
 echo "--------------------------------------------------"
-echo "🛰️  Populating raw data matrices using accelerated download threads..."
+echo "Populating raw data matrices using accelerated download threads..."
 echo "--------------------------------------------------"
 
 # Create a secure temporary workspace for orchestration mapping
@@ -84,7 +84,7 @@ ESTADO=$?
 rm "$F_TEMPORAL"
 
 echo "--------------------------------------------------"
-echo "🧹 Sanitizing filenames & cleaning URI query suffixes..."
+echo "Sanitizing filenames & cleaning URI query suffixes..."
 echo "--------------------------------------------------"
 
 # Post-processing Phase: Clean '?download=1' strings natively within each folder
@@ -112,22 +112,22 @@ done
     ZIP_FILE="higgs.zip"
 
     if [ -f "$ZIP_FILE" ]; then
-        echo "📦 Extracting $ZIP_FILE in raw repository branch..."
+        echo "Extracting $ZIP_FILE in raw repository branch..."
         unzip -oq "$ZIP_FILE"
         if [ $? -eq 0 ]; then
-            echo "✅ Extraction complete."
+            echo "Extraction complete."
             rm "$ZIP_FILE"
-            echo "🗑️  Purged $ZIP_FILE to protect host storage space."
+            echo "Purged $ZIP_FILE to protect host storage space."
         else
-            echo "❌ Error unzipping $ZIP_FILE archive."
+            echo "Error unzipping $ZIP_FILE archive."
         fi
     fi
 )
 
 echo "--------------------------------------------------"
 if [ $ESTADO -eq 0 ]; then
-    echo "🎉 Portability setup completed. Data environment is synchronized!"
+    echo "Portability setup completed. Data environment is synchronized!"
 else
-    echo "⚠️  Download complete but some transfer streams might have warned."
+    echo "Download complete but some transfer streams might have warned."
 fi
 echo "--------------------------------------------------"
