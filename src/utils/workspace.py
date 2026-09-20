@@ -426,5 +426,26 @@ def get_config(task, seed, full_dataset=False, apply_mass_cut=None, n_subsets=No
         "rf_feature_importance_plot": os.path.join(outputs_dir, "plots", "rf", "rf_feature_importance.png"),
     }
 
+    # Untrained (baseline) ideal-device evals for the basis comparison: SineKAN warm
+    # start ("sine_baseline") and untrained random VQC init ("baseline_random").
+    # Same key scheme as the blocks above: {metric}_qkan{suffix}_ideal.
+    for suffix, sub in (("_sine_baseline", "sine_baseline"), ("_baseline_random", "baseline_random")):
+        plots = os.path.join(outputs_dir, "plots", "qkan", "ideal", sub)
+        results = os.path.join(outputs_dir, "results", "qkan", "ideal", sub)
+        name = f"qkan{suffix}_ideal"
+        CONFIG.update({
+            f"roc_{name}": os.path.join(plots, f"roc_{name}.png"),
+            f"pr_{name}": os.path.join(plots, f"pr_{name}.png"),
+            f"cm_{name}": os.path.join(plots, f"cm_{name}.png"),
+            f"cm_{name}_normalized": os.path.join(plots, f"cm_{name}_normalized.png"),
+            f"metrics_{name}": os.path.join(results, f"metrics_{name}.json"),
+            f"qkan_eval_data_true{suffix}_ideal": os.path.join(results, f"qkan_eval_true{suffix}_ideal.npy"),
+            f"qkan_eval_data_probs{suffix}_ideal": os.path.join(results, f"qkan_eval_probs{suffix}_ideal.npy"),
+            f"qkan_eval_data_binary{suffix}_ideal": os.path.join(results, f"qkan_eval_binary{suffix}_ideal.npy"),
+        })
+
+    # SineKAN warm-start graph (kept apart from the Chebyshev quantum_weights.pt)
+    CONFIG["quantum_graph_sine_filename"] = "quantum_weights_sine.pt"
+
     CONFIG.update(hp)
     return CONFIG

@@ -5,6 +5,8 @@ import torch.nn as nn
 import os
 import matplotlib.pyplot as plt
 
+from src.architectures.sine_basis import build_sine_grid
+
 
 class QKANModel(nn.Module):
     """
@@ -47,6 +49,10 @@ class QKANModel(nn.Module):
         self.n_qubits = graph["n_qubits"]
         self.active_inputs = graph["active_inputs"]
         self.degree = graph["degree"]
+        self.basis = graph.get("basis", "chebyshev")
+        if self.basis == "sine":
+            # Fixed (non-trainable) SineKAN grid: theta_k(x) = freq_k * x + phase_k
+            self._sine_freq, self._sine_phase = build_sine_grid(self.degree, is_first=True)
 
         # ------------------------------------------------------------
         # Building the STATIC PLAN (once, not inside the circuit)
@@ -177,6 +183,14 @@ class QKANModel(nn.Module):
             qml.RZ(theta, wires=wire)
         qml.RY(weights[self.degree], wires=wire)
 
+    def _qkan_edge_sine(self, x_val, weights, wire):
+        """SineKAN-basis re-uploading on `wire`: per harmonic k, RY(A_k) then
+        RZ(freq_k * x + phase_k); the last weight (index `degree`) is a final RY."""
+        for k in range(self.degree):
+            qml.RY(weights[k], wires=wire)
+            qml.RZ(float(self._sine_freq[k]) * x_val + float(self._sine_phase[k]), wires=wire)
+        qml.RY(weights[self.degree], wires=wire)
+
     def _circuit(self, inputs):
         # --- Stage 1: inputs -> hidden nodes (free sum + mult via ZZ) ---
         for idx, edge in enumerate(self._edge_table):
@@ -188,7 +202,8 @@ class QKANModel(nn.Module):
             # column at once -- PennyLane's parameter broadcasting then
             # executes the full batch as one tape instead of one sample at a
             # time (see forward()).
-            self._qkan_edge(inputs[:, edge["in_col"]], self.edge_weights[idx], wire=edge["acc_wire"])
+            edge_fn = self._qkan_edge_sine if self.basis == "sine" else self._qkan_edge
+            edge_fn(inputs[:, edge["in_col"]], self.edge_weights[idx], wire=edge["acc_wire"])
 
         for idx, zz in enumerate(self._zz_table):
             qml.IsingZZ(self.zz_weights[idx], wires=[zz["wire_a"], zz["wire_b"]])
