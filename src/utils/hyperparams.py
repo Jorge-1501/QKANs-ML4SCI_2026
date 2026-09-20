@@ -93,7 +93,7 @@ def get_hyperparams():
         # seeds ONLY the one-time canonical partition itself, decoupled from --seed,
         # so the partition is stable regardless of which seed later selects a subset.
         "n_subsets": 5,
-        "subset_split_seed": 42,
+        "subset_split_seed": 37,
 
         # ---------------------------
         # Random Forest Hyperparameters
