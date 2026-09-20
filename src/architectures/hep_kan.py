@@ -96,7 +96,32 @@ class HEPKAN(KAN):
         """
         return 
 
-    def plot(self, folder="./figures", save_path=None, beta=3, metric='backward', 
+    def _resolve_in_vars(self, in_vars, n):
+        """
+        Returns exactly `n` input labels for plot(), whatever len(in_vars) is.
+
+        - len(in_vars) == n: used as-is.
+        - Pruned model (`input_id` holds the surviving column indices of the
+          original input): labels are picked by those indices, so node i shows
+          the name of the feature it really is, not the i-th name of the list.
+        - Anything else (e.g. width[0] raised above the name list): truncate or
+          pad with generic `x_{i}` and warn, instead of raising IndexError.
+        """
+        in_vars = list(in_vars)
+        if len(in_vars) == n:
+            return in_vars
+
+        input_id = getattr(self, 'input_id', None)
+        if input_id is not None:
+            ids = [int(k) for k in input_id]
+            if len(ids) == n and all(0 <= k < len(in_vars) for k in ids):
+                return [in_vars[k] for k in ids]
+
+        print(f"Warning: plot() got {len(in_vars)} in_vars for {n} inputs; "
+              f"{'truncating' if len(in_vars) > n else 'padding with x_i'}.")
+        return in_vars[:n] + [f'x_{i + 1}' for i in range(len(in_vars), n)]
+
+    def plot(self, folder="./figures", save_path=None, beta=3, metric='backward',
              scale=0.5, tick=False, sample=False, in_vars=None, out_vars=None, 
              title=None, varscale=1.0, edge_dpi=150, thumb_dpi=50):
         """
@@ -389,8 +414,9 @@ class HEPKAN(KAN):
  
         if in_vars is not None:
             n = self.width_in[0]
+            in_labels = self._resolve_in_vars(in_vars, n)
             for i in range(n):
-                text_var = f'${sympy.latex(in_vars[i])}$' if isinstance(in_vars[i], sympy.Expr) else in_vars[i]
+                text_var = f'${sympy.latex(in_labels[i])}$' if isinstance(in_labels[i], sympy.Expr) else in_labels[i]
                 plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), -0.1, text_var, fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
  
         if out_vars is not None:
