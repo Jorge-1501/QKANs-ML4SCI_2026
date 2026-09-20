@@ -15,7 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from src.architectures.qkan_model import QKANModel
 
 class QuantumKANTrainer:
-    def __init__(self, config, train_backend="ideal", random_init=False):
+    def __init__(self, config, train_backend="ideal", random_init=False, graph_filename="quantum_weights.pt"):
         self.config = config
         self.train_backend = train_backend
         self.random_init = random_init
@@ -24,7 +24,7 @@ class QuantumKANTrainer:
         torch.set_num_threads(max(1, os.cpu_count() or 1))
 
         # Initialize the model pointing to the unified .pt file
-        weights_path = os.path.join(self.config["polynomial_weights_dir"], "quantum_weights.pt")
+        weights_path = os.path.join(self.config["polynomial_weights_dir"], graph_filename)
         self.model = QKANModel(graph_path=weights_path, backend_mode=train_backend, random_init=random_init)
         
         self.criterion = nn.BCEWithLogitsLoss()
@@ -148,7 +148,7 @@ class QuantumKANTrainer:
             json.dump(history, f, indent=4)
         return history
 
-    def evaluate(self, X_test, y_test, eval_backend="noisy", baseline=False, random_init=False):
+    def evaluate(self, X_test, y_test, eval_backend="noisy", baseline=False, random_init=False, sine=False):
         """
         Evaluate the quantum model on the test set.
         Allows changing the simulation backend specifically for evaluation.
@@ -163,6 +163,8 @@ class QuantumKANTrainer:
             - random_init (bool): if True, routes plots/metrics to the
               *_random_{eval_backend} config paths instead, for the
               random-VQC-init ablation (see QKANModel's random_init flag).
+            - sine (bool): if True, routes to the *_sine_* config paths (SineKAN-basis
+              warm start), combinable with baseline=True.
         """
         print(f"\n" + "="*50)
         print(f"[Q-Trainer] {'Baseline ' if baseline else ''}Evaluating QKAN on the test set. Backend: '{eval_backend}'")
@@ -237,7 +239,7 @@ class QuantumKANTrainer:
         # evaluate_baseline()), so pre- and post-training metrics never collide.
         import src.utils.metrics as viz
         efficiency_metrics = viz.compute_efficiency_metrics(test_true, test_probs)
-        suffix = ("_baseline" if baseline else "") + ("_random" if random_init else "")
+        suffix = ("_sine" if sine else "") + ("_baseline" if baseline else "") + ("_random" if random_init else "")
         viz.plot_roc_curve(test_true, test_probs, save_path=self.config[f"roc_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix_normalized(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}_normalized"])
@@ -259,6 +261,7 @@ class QuantumKANTrainer:
             "Backend": eval_backend,
             "Baseline": baseline,
             "Random Init": random_init,
+            "Sine Basis": sine,
             "Eval Time (s)": eval_time,
             "Test AUC": test_auc,
             "Test Accuracy": test_acc,
@@ -276,7 +279,7 @@ class QuantumKANTrainer:
 
         return metrics_dic
 
-    def evaluate_baseline(self, X_test, y_test, eval_backend="noisy"):
+    def evaluate_baseline(self, X_test, y_test, eval_backend="noisy", random_init=False, sine=False):
         """
         Evaluate the freshly warm-started (untrained) QKAN, before any quantum
         fine-tuning, using the exact same metrics/plot pipeline as evaluate()
@@ -298,7 +301,8 @@ class QuantumKANTrainer:
         under eval_backend.
         """
         print(f"\n[Q-Trainer] Baseline evaluation (untrained, warm-start only). Backend: '{eval_backend}'")
-        metrics = self.evaluate(X_test, y_test, eval_backend=eval_backend, baseline=True)
+        metrics = self.evaluate(X_test, y_test, eval_backend=eval_backend, baseline=True,
+                                random_init=random_init, sine=sine)
 
         if self.model.backend_mode != self.train_backend:
             print(f"[Q-Trainer] Restoring backend to '{self.train_backend}' for training...")

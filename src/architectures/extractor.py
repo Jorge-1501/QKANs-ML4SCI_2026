@@ -42,6 +42,8 @@ class SymbolicWarmStartExtractor:
     earlier discussion) — this extractor does not solve that.
     """
 
+    basis = "chebyshev"
+
     def __init__(self, config):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -336,6 +338,7 @@ class SymbolicWarmStartExtractor:
             "n_qubits": n_qubits,
             "active_inputs": active_inputs,   # classical RAW indices (to filter X in forward())
             "degree": final_degree,
+            "basis": self.basis,               # "chebyshev" | "sine" (selects the circuit edge in QKANModel)
             "hidden_nodes": hidden_nodes,      # list of {type, edge_groups: [[{wire,coefs}, ...], ...]}
             "output_edges": output_edges,      # list of {hidden_idx, coefs}
         }
