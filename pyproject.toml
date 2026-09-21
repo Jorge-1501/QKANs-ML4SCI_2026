@@ -5,19 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
 dependencies = [
-    "fastparquet>=2026.5.0",
     "h5py>=3.16.0",
     "hdf5plugin>=6.0.0",
     "ipykernel>=7.2.0",
-    "markitdown[all]>=0.1.5",
     "matplotlib>=3.7.2",
     "numpy>=2.4.6",
     "pandas>=2.9.0",
     "pennylane>=0.40.0",
-    "pennylane-lightning-gpu>=0.45.0",
     "pennylane-qiskit>=0.40.0",
     "polars>=1.41.2",
-    "pyarrow>=18.0.0",
     "pykan",
     "pyyaml>=6.0.3",
     "qiskit-aer>=0.17.2",

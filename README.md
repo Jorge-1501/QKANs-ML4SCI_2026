@@ -13,7 +13,7 @@ The project builds a classical **Kolmogorov-Arnold Network (KAN)** for High Ener
 
 Each jet is represented by 22 features: total jet mass `m`, particle multiplicity `n`, and per-particle `DR_i`/`pT_i` for the 10 leading particles.
 
-**Data regime.** The balanced dataset is split once into **5 disjoint, class balanced statistical replicate subsets**. `--seed` selects the `seed % n_subsets`-th replicate and drives the *entire* pipeline (base training → pruning → retraining → extraction → quantum training/evaluation) on that one subset, so running several seeds gives independent end-to-end replicates instead of one full-dataset point estimate. `scripts/run_preprocessing.py` / `run_preprocessing_qg.py` build this canonical cache; every other script only selects from it (and raises if the cache doesn't exist yet).
+**Data regime.** The balanced dataset is split once into **5 disjoint, class balanced statistical replicate subsets**. `--seed` selects the `seed % n_subsets`-th replicate and drives the *entire* pipeline (base training → pruning → retraining → extraction → quantum training/evaluation) on that one subset, so running several seeds gives independent end-to-end replicates instead of one full-dataset point estimate. `scripts/run_preprocessing.py` builds this canonical cache; every other script only selects from it (and raises if the cache doesn't exist yet).
 
 **Pipeline.**
 1. **Base KAN training**. `src/architectures/classic_kan.py`, the base [pykan](https://github.com/KindXiaoming/pykan)-derived KAN trainer.
@@ -38,10 +38,10 @@ Each jet is represented by 22 features: total jet mass `m`, particle multiplicit
 ## Structure
 
 The repository includes:
-* `notebooks/`: exploratory data analysis (`EDA_QG.ipynb`, `EDA_higgs.ipynb`, `EDA_top.ipynb`) and results analysis (`Results.ipynb`).
+* `notebooks/`: exploratory data analysis (`EDA_top.ipynb`), a step-by-step walkthrough of the training process (`Training_process.ipynb`), and results analysis (`Results.ipynb`).
 * `src/`: code for the project.
   * `architectures/`. model implementations: `classic_kan.py`, `hep_kan.py`, `extractor.py`, `sine_basis.py`/`extractor_sine.py`, `qkan_model.py`, `quantum_kan.py`, `random_forest.py`.
-  * `preprocessing/`: `balance.py` (class balancing + 15-way subset split), `processor_top.py`, `processor_qg.py`.
+  * `preprocessing/`: `balance.py` (class balancing + `n_subsets`-way subset split, 5 by default), `processor_top.py`, `processor_qg.py`.
   * `utils/`: `hyperparams.py`, `workspace.py` (path/config resolution), `metrics.py`, `reporting.py` (metrics aggregation), `evaluate_qkan.py`.
 * `scripts/`: CLI entry points for data downloading, preprocessing, training, and evaluation (see below).
 * `tests/`: pytest suite.
@@ -61,15 +61,35 @@ The repository includes:
 ---
 
 ## Environment
-Follow the next command to install.
+
+Python **3.11 or 3.12** is required (`requires-python = ">=3.11, <3.13"`). Two equivalent ways to set up the environment are provided; use one of them.
+
+### Option A: uv (recommended, reproducible from `uv.lock`)
 
 ```bash
 pip install uv
+uv sync                       # create/sync the virtual environment (.venv)
+uv sync --extra cuda          # ...with the CUDA (cu121) torch build
+uv sync --extra cpu           # ...or with the CPU-only torch build (mutually exclusive with cuda)
 ```
 
-Create the virtual environment
+### Option B: classic pip + venv (from `requirements.txt`)
+
+`requirements.txt` is a frozen snapshot (`pip freeze`) of the project virtual environment, with every version pinned. It targets the **CUDA 12.1** build of torch (`torch==2.4.1+cu121`) and already carries the PyTorch `--extra-index-url` line at the top.
+
 ```bash
-uv sync
+python3.11 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+For a **CPU-only** machine, change the `--extra-index-url` at the top of `requirements.txt` to `https://download.pytorch.org/whl/cpu` and the torch pin to `torch==2.4.1+cpu`. `pykan` is installed from GitHub (pinned to a commit in `requirements.txt`), so `git` must be available.
+
+To regenerate the file after changing the environment, run this with the venv activated:
+
+```bash
+pip freeze > requirements.txt      # then re-add the header lines (--extra-index-url ...)
 ```
 
 ---
@@ -131,15 +151,6 @@ python scripts/train_rf.py --task top --seed 42 [--full-dataset]
 python scripts/collect_metrics.py --task top
 ```
 
-### Quark-gluon pipeline
-
-```bash
-python scripts/run_preprocessing_qg.py [--full-dataset] --force
-python scripts/train_kan_qg.py --seed 42 [--full-dataset]
-python scripts/train_rf.py --task quark-gluon --seed 42 [--full-dataset]
-python scripts/collect_metrics.py --task quark-gluon
-```
-
 ### Basis comparison and sweeps
 
 ```bash
@@ -168,7 +179,8 @@ The resulting output files are generated in the `outputs/` directory, organized 
 ## Testing
 
 ```bash
-uv run pytest tests/ -v
+uv run pytest tests/ -v            # with uv
+python -m pytest tests/ -v         # with an activated pip/venv environment
 ```
 
 The suite covers pruning fan-in behavior, Chebyshev/sine warm-start extraction, quantum-baseline evaluation behavior, efficiency-metric computation, metrics reporting/workspace path utilities, and dataset balancing/subset splitting.
@@ -183,6 +195,6 @@ MIT License, © 2026 Jorge Toral. See [LICENSE](LICENSE).
 
 ## Acknowledgements / References
 
-* Kolmogorov-Arnold Networks — [pykan](https://github.com/KindXiaoming/pykan) (vendored and modified under `libs/pykan/`).
+* Kolmogorov-Arnold Networks — [pykan](https://github.com/KindXiaoming/pykan) (installed from GitHub; the project's modifications live in `src/architectures/hep_kan.py` as a subclass, not in a fork).
 * SineKAN — Reinhardt et al., 2024, [arXiv:2407.04149](https://arxiv.org/abs/2407.04149).
 * [ML4SCI](https://ml4sci.org/) / Google Summer of Code 2026.
