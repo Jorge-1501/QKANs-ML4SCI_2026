@@ -26,7 +26,7 @@ class QKANModel(nn.Module):
         the pruned classical graph marks as feeding into a real mult node
         (the depth/count of IsingZZ gates is now dynamic, not fixed).
 
-    EXPLICIT LIMITATION (this code doesn't hide it):
+    EXPLICIT LIMITATION:
     The hidden->output stage ("stage 2") cannot re-upload a hidden node's
     value with a new exact DRU encoding, because that value lives in a
     qubit's accumulated phase/rotation, not as a classical number readable

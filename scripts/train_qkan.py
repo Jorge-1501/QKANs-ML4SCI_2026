@@ -62,9 +62,7 @@ def main(args):
     extractor = SymbolicWarmStartExtractor(CONFIG)
     
     # Extraction now reads the post-retrain, pre-symbolic-fit checkpoint
-    # (03_retrained), fitting Chebyshev polynomials against the numeric spline
-    # branch directly instead of the symbolically-simplified 05_final model —
-    # avoids compounding a lossy symbolic-formula fit before the Chebyshev fit.
+    # fitting Chebyshev polynomials against the numeric spline
     classic_model_path = os.path.join(CONFIG['retrained_model_path'], "03_retrained")
     output_weights_path = os.path.join(CONFIG["polynomial_weights_dir"], "quantum_weights.pt")
     report_path = CONFIG.get("Chebyshev_coefficients_path", os.path.join(CONFIG["results_dir"], "chebyshev_report.txt"))
@@ -89,7 +87,7 @@ def main(args):
         q_trainer.evaluate(X_test, y_test, eval_backend="ideal", random_init=True)
         return
 
-    # Baseline evaluation: warm-started QKAN BEFORE any quantum fine-tuning, on
+    # Baseline evaluation: warm-started QKAN before any quantum fine-tuning, on
     # all three simulation backends, to measure how much predictive signal
     # survives the classical->quantum extraction alone.
     for backend in ("ideal", "noisy", "shots"):
@@ -107,8 +105,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train QKAN with architecture inferred from the classical model.")
     parser.add_argument('--seed', type=int, default=42, help='Global seed')
     parser.add_argument('--train_backend', type=str, choices=['noisy', 'ideal', 'shots'], default='ideal')
-    # --eval_backend removed: evaluation now always runs on both 'ideal' and
-    # 'noisy' backends, before AND after training (4 evaluations total).
+    # evaluation always runs on both 'ideal' and 'noisy' backends, before and after training.
     parser.add_argument('--force', action='store_true', help='Force extraction and retraining')
     parser.add_argument('--task', type=str, choices=['top', 'quark-gluon'], default='top')
     parser.add_argument("--full-dataset", dest="full_dataset", action="store_true",

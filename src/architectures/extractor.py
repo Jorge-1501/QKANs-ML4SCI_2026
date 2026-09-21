@@ -16,30 +16,10 @@ class SymbolicWarmStartExtractor:
     (sum nodes vs. multiplication nodes, and which edges feed into each one),
     instead of flattening the network into a flat list of active inputs.
 
-    IMPORTANT - where it reads from: this extractor is meant to run on the
-    03_retrained checkpoint (post pruning + retraining, BEFORE symbolic
-    simplification), and fits its Chebyshev polynomials against the NUMERIC
-    branch (act_fun, learned splines) of each edge, not against symbolic_fun.
-    At that stage symbolic_fun is still pykan's zero placeholder (fix_symbolic
-    hasn't been called yet), so act_fun is the only branch with real
-    information. This avoids a fit-of-a-fit: previously symbolic_fun was read
-    from the 05_final checkpoint (post symbolic simplification + fine-tuning),
-    adding one extra lossy symbolic approximation between the learned spline
-    and the final Chebyshev fit.
-
-    Index convention (identical to the one HEPKAN.plot() already uses,
-    verified and functional in the pipeline):
+    Index convention:
         - act_fun[l].mask[i][j]        -> [previous_node=i][raw_neuron=j]
         - symbolic_fun[l].mask[j][i]   -> [raw_neuron=j][previous_node=i]
-    An edge (i -> j) in layer l is active if act_fun[l].mask[i][j] != 0
-    (act_fun's mask reflects pruning by itself at this pipeline stage).
-
-    IMPORTANT - scope of this version:
-    This extraction is designed for depth-2 architectures (inputs -> hidden
-    layer -> output), which is the current use case
-    (width=[22,[9,9],1], depth=2). Generalizing to depth >2 in a single
-    coherent circuit would require mid-circuit measurement + re-encoding (see
-    earlier discussion) — this extractor does not solve that.
+    An edge (i -> j) in layer l is active if act_fun[l].mask[i][j] != 0.
     """
 
     basis = "chebyshev"
@@ -47,13 +27,7 @@ class SymbolicWarmStartExtractor:
     def __init__(self, config):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # Fixed Chebyshev degree (not a search ceiling): every edge is fit at
-        # exactly this degree, no R2-gated minimum-degree search. See
-        # reports/AUC_test/ for why the search was reverted.
         self.max_degree = self.config.get("chebyshev_max_degree", 4)
-        # Dynamic-range threshold: an edge with negligible variation
-        # (Δy = max(y) - min(y)) is discarded, same as before, but now
-        # applied edge-by-edge across ALL layers, not just the input layer.
         self.dynamic_range_threshold = self.config.get("qkan_dynamic_range_threshold", 1e-3)
 
     # ------------------------------------------------------------------
@@ -72,11 +46,7 @@ class SymbolicWarmStartExtractor:
 
         def layer_forward(x_in):
             try:
-                # Reads the NUMERIC branch (splines) instead of the symbolic
-                # one: at the 03_retrained checkpoint, symbolic_fun[l] is
-                # still pykan's zero placeholder (fix_symbolic hasn't been
-                # called yet), so act_fun is the only branch with real
-                # information at this pipeline stage.
+                # Reads the NUMERIC branch instead of the symbolic one
                 numeric = model.act_fun[layer_index](x_in)
                 x_out = numeric[0] if isinstance(numeric, tuple) else numeric
             except Exception:
@@ -109,15 +79,8 @@ class SymbolicWarmStartExtractor:
     def _fit_edge(self, model, layer_index, input_index, output_index, x_vals):
         """
         Fits a Chebyshev polynomial to this edge's isolated response at a
-        FIXED degree (self.max_degree) -- no R2-gated search, no early
-        acceptance at a lower degree. This mirrors the historical (pre-brute-
-        force-search) extraction behavior: chebfit is a discrete least-
-        squares refit at each degree, not a truncation of one fixed fit, so
-        accepting a lower degree the moment it clears an R2 threshold
-        silently produces different low-order coefficients rather than just
-        dropping high-order terms -- on the smaller post-split training
-        subsets this was gating on noisy low-degree fits and collapsing
-        downstream AUC (see reports/AUC_test/qkan_chebyshev_min_degree_experiment.md).
+        fixed degree (self.max_degree). No R2-gated search, no early
+        acceptance at a lower degree..
 
         Args:
             model: The neural network model.
@@ -146,14 +109,12 @@ class SymbolicWarmStartExtractor:
         return coefs.tolist(), dynamic_range, self.max_degree, r2
 
     # ------------------------------------------------------------------
-    # Grouping of raw neurons into collapsed nodes (sum / mult), replicating
-    # EXACTLY the grouping logic that plot() already uses to draw the
-    # connections between layers.
+    # Grouping of raw neurons into collapsed nodes (sum / mult)
     # ------------------------------------------------------------------
     def _build_node_groups(self, model, layer_plus_1_idx):
         """
-        Returns a list of collapsed nodes for layer `layer_plus_1_idx`
-        (i.e. the DESTINATION layer of the edges from layer layer_plus_1_idx-1).
+        Returns a list of collapsed nodes for layer `layer_plus_1_idx`,
+        i.e. the destination layer of the edges from layer layer_plus_1_idx-1.
         Each node is a dict: {'type': 'sum'|'mult', 'raw_indices': [...]}
         """
         width = model.width
@@ -207,9 +168,6 @@ class SymbolicWarmStartExtractor:
         print("[Extractor] Evaluating active edges: inputs -> hidden layer...")
         for j in range(n_raw_hidden):
             for i in range(n_inputs):
-                # symbolic_fun's mask is always zero at this pipeline stage
-                # (03_retrained, pre fix_symbolic) — act_fun's mask alone
-                # correctly reflects which edges survived pruning.
                 mask_act = model.act_fun[0].mask[i, j].item()
                 if mask_act == 0.0:
                     continue
@@ -229,23 +187,18 @@ class SymbolicWarmStartExtractor:
             raise RuntimeError("[Extractor] No input edge cleared the dynamic-range threshold. "
                                 "Check 'qkan_dynamic_range_threshold' or the classical pruning.")
 
-        # input_pos: classical raw_idx -> READ position within the already-filtered
-        # data tensor (self.active_inputs on the model). This is NOT a quantum wire: the
-        # same input can be read from here multiple times, on several different wires,
-        # with no conflict (fan-out). The quantum (accumulator) wire is assigned below,
-        # one per surviving raw neuron/group — never one per input.
         input_pos = {raw_idx: pos for pos, raw_idx in enumerate(active_inputs)}
         print(f"[Extractor] {len(active_inputs)} active classical variables (raw inputs: {active_inputs})")
 
         for j in raw_edges_layer0:
             for e in raw_edges_layer0[j]:
-                e["col"] = input_pos[e["input_idx"]]  # where the classical column is READ from
+                e["col"] = input_pos[e["input_idx"]]
 
         # ---- Group raw neurons into collapsed hidden-layer nodes ----------
         # This is where the real quantum WIRES are assigned: one per surviving
-        # raw neuron/group (an accumulator), NEVER one per input. The same input
+        # raw neuron/group (an accumulator), never one per input. The same input
         # can write (via _qkan_edge) to several of these wires if it feeds
-        # several branches (fan-out) — that's correct and expected, not a bug.
+        # several branches.
         hidden_groups = self._build_node_groups(model, 1)  # layer 1 (hidden) nodes
         hidden_nodes = []
         wire_counter = 0
@@ -259,7 +212,8 @@ class SymbolicWarmStartExtractor:
                     group_wire = wire_counter
                     wire_counter += 1
                     for e in edges:
-                        e["wire"] = group_wire  # wire DEDICATED to this accumulator (not to the input)
+                        # wire dedicated to this accumulator (not to the input)
+                        e["wire"] = group_wire
                 edge_groups.append(edges)
             if not has_any_edge:
                 # Fully pruned hidden node (none of its raw neurons survived)
@@ -320,13 +274,6 @@ class SymbolicWarmStartExtractor:
         print(f"[Extractor] Active hidden->output edges: {len(output_edges)}")
 
         # ---- Pad every edge's coefs to a single uniform degree -------------
-        # qkan_model.py assumes one global degree for the whole graph
-        # (torch.stack over all edges' coefs, and a `for i in range(self.degree)`
-        # loop bound in _qkan_edge). Since _fit_edge now picks a per-edge
-        # minimum degree, right-pad every edge's coefs with trailing zero
-        # Chebyshev coefficients up to the max degree actually used across the
-        # whole graph -- this is exact (zero coefficients don't change the
-        # fitted function's value), not an approximation.
         all_edges = [e for edges in raw_edges_layer0.values() for e in edges] + output_edges
         final_degree = max(e["degree"] for e in all_edges)
         for e in all_edges:

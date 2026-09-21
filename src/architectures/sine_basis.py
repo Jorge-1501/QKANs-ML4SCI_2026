@@ -1,10 +1,10 @@
 # src/architectures/sine_basis.py
 """
-SineKAN basis (Reinhardt et al. 2024, arXiv:2407.04149), univariate-edge form:
+SineKAN basis, univariate-edge form:
 
     y = sum_k  A_k * sin(freq_k * x + phase_k)
 
-freq_k / phase_k are FIXED by the grid size (ported 1:1 from the reference
+freq_k / phase_k are fixed by the grid size (ported 1:1 from the reference
 SineKANLayer.__init__), so the basis functions are fixed functions of x, like
 T_n(x) for Chebyshev, and the amplitudes A_k solve a plain linear least-squares
 problem. Shared by the extractor (fit) and the circuit (rotation angles).
