@@ -227,6 +227,7 @@ def get_config(task, seed, full_dataset=False, apply_mass_cut=None, n_subsets=No
         # Cross-run metrics collection (Parquet table, task-level)
         "aggregate_dir": aggregate_dir,
         "metrics_table_path": os.path.join(aggregate_dir, "metrics_table.parquet"),
+        "sine_comparison_summary_path": os.path.join(aggregate_dir, "sine_vs_chebyshev_vs_random_baseline.json"),
         "pipeline_logs_dir": pipeline_logs_dir,
 
         # Output targets for models and reports

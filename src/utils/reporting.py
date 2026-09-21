@@ -22,7 +22,13 @@ METRIC_REGISTRY = {
     "qkan_ideal": "metrics_qkan_ideal",
     "qkan_noisy": "metrics_qkan_noisy",
     "qkan_shots": "metrics_qkan_shots",
+    # Untrained ideal-device init comparison (scripts/eval_sine_baseline.py):
+    # qkan_baseline_ideal (Chebyshev warm start, written by train_qkan.py) vs.
+    # qkan_sine_baseline_ideal (SineKAN warm start) vs. qkan_baseline_random_ideal
+    # (random N(0,1) weights). qkan_random_ideal below is the *trained* random init.
     "qkan_baseline_ideal": "metrics_qkan_baseline_ideal",
+    "qkan_sine_baseline_ideal": "metrics_qkan_sine_baseline_ideal",
+    "qkan_baseline_random_ideal": "metrics_qkan_baseline_random_ideal",
     "qkan_baseline_noisy": "metrics_qkan_baseline_noisy",
     "qkan_baseline_shots": "metrics_qkan_baseline_shots",
     "qkan_random_ideal": "metrics_qkan_random_ideal",

@@ -1,8 +1,11 @@
 # scripts/collect_metrics.py
 # Collects the per-run/per-stage metrics JSON files already written across every
 # outputs/<task>/**/seed_*/ run directory into one long-format Parquet table, tagged by
-# task/seed/variant/subset_id/model. The table is task-level (variant-independent);
-# filter on its `variant` column to select one data regime.
+# task/seed/variant/subset_id/model. The table is task-level (variant-independent) and
+# covers every regime found on disk (n-subset runs and the full-dataset run); filter on its
+# `variant` column to select one. Per-seed untrained-init comparison rows (Chebyshev / sine /
+# random, from scripts/eval_sine_baseline.py) are the `qkan_baseline_ideal`,
+# `qkan_sine_baseline_ideal` and `qkan_baseline_random_ideal` models.
 import argparse
 import os
 import sys
