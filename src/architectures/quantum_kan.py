@@ -15,16 +15,17 @@ sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from src.architectures.qkan_model import QKANModel
 
 class QuantumKANTrainer:
-    def __init__(self, config, train_backend="ideal"):
+    def __init__(self, config, train_backend="ideal", random_init=False, graph_filename="quantum_weights.pt"):
         self.config = config
         self.train_backend = train_backend
+        self.random_init = random_init
         # Use all available CPU cores for the classical-side work (loss,
         # optimizer, grad clipping) instead of an artificial fixed cap.
         torch.set_num_threads(max(1, os.cpu_count() or 1))
-        
+
         # Initialize the model pointing to the unified .pt file
-        weights_path = os.path.join(self.config["polynomial_weights_dir"], "quantum_weights.pt")
-        self.model = QKANModel(graph_path=weights_path, backend_mode=train_backend)
+        weights_path = os.path.join(self.config["polynomial_weights_dir"], graph_filename)
+        self.model = QKANModel(graph_path=weights_path, backend_mode=train_backend, random_init=random_init)
         
         self.criterion = nn.BCEWithLogitsLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.get("qkan_learning_rate", 5e-3))
@@ -34,15 +35,16 @@ class QuantumKANTrainer:
         self._setup_backend_paths()
 
     def _setup_backend_paths(self):
+        prefix = "random_" if self.random_init else ""
         if self.train_backend == "noisy":
-            self.save_path = self.config["qkan_noisy_path"]
-            self.history_path = self.config["history_noisy_loss"]
+            self.save_path = self.config[f"qkan_{prefix}noisy_path"]
+            self.history_path = self.config[f"history_{prefix}noisy_loss"]
         elif self.train_backend == "shots":
-            self.save_path = self.config["qkan_shots_path"]
-            self.history_path = self.config["history_shots_loss"]
+            self.save_path = self.config[f"qkan_{prefix}shots_path"]
+            self.history_path = self.config[f"history_{prefix}shots_loss"]
         else:
-            self.save_path = self.config["qkan_ideal_path"]
-            self.history_path = self.config["history_ideal_loss"]
+            self.save_path = self.config[f"qkan_{prefix}ideal_path"]
+            self.history_path = self.config[f"history_{prefix}ideal_loss"]
 
     def fit(self, X_train, y_train, X_val, y_val, resume=True, force=False):
         if os.path.exists(self.save_path) and resume and not force:
@@ -146,7 +148,7 @@ class QuantumKANTrainer:
             json.dump(history, f, indent=4)
         return history
 
-    def evaluate(self, X_test, y_test, eval_backend="noisy", baseline=False):
+    def evaluate(self, X_test, y_test, eval_backend="noisy", baseline=False, random_init=False, sine=False):
         """
         Evaluate the quantum model on the test set.
         Allows changing the simulation backend specifically for evaluation.
@@ -158,6 +160,11 @@ class QuantumKANTrainer:
               "Baseline": True. Used by evaluate_baseline() to keep pre-training
               (warm-start-only) metrics separate from post-training ones, so
               both can be compared side by side.
+            - random_init (bool): if True, routes plots/metrics to the
+              *_random_{eval_backend} config paths instead, for the
+              random-VQC-init ablation (see QKANModel's random_init flag).
+            - sine (bool): if True, routes to the *_sine_* config paths (SineKAN-basis
+              warm start), combinable with baseline=True.
         """
         print(f"\n" + "="*50)
         print(f"[Q-Trainer] {'Baseline ' if baseline else ''}Evaluating QKAN on the test set. Backend: '{eval_backend}'")
@@ -231,16 +238,30 @@ class QuantumKANTrainer:
         # *_baseline_{eval_backend} config keys instead of the plain ones (see
         # evaluate_baseline()), so pre- and post-training metrics never collide.
         import src.utils.metrics as viz
-        suffix = "_baseline" if baseline else ""
+        efficiency_metrics = viz.compute_efficiency_metrics(test_true, test_probs)
+        suffix = ("_sine" if sine else "") + ("_baseline" if baseline else "") + ("_random" if random_init else "")
         viz.plot_roc_curve(test_true, test_probs, save_path=self.config[f"roc_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}"])
         viz.plot_confusion_matrix_normalized(cm, save_path=self.config[f"cm_qkan{suffix}_{eval_backend}_normalized"])
         viz.plot_precision_recall_curve(test_true, test_probs, save_path=self.config[f"pr_qkan{suffix}_{eval_backend}"])
         metrics_path = self.config[f"metrics_qkan{suffix}_{eval_backend}"]
 
+        import os
+        os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+
+        # Persist raw probabilities/labels too, mirroring the {stage}_eval_data_*
+        # convention ClassicKANTrainer/RandomForestTrainer already use -- needed
+        # for any downstream analysis (e.g. re-deriving efficiency/rejection at
+        # other working points) beyond what's baked into metrics_dic.
+        np.save(self.config[f"qkan_eval_data_true{suffix}_{eval_backend}"], test_true)
+        np.save(self.config[f"qkan_eval_data_probs{suffix}_{eval_backend}"], test_probs)
+        np.save(self.config[f"qkan_eval_data_binary{suffix}_{eval_backend}"], test_preds_binary)
+
         metrics_dic = {
             "Backend": eval_backend,
             "Baseline": baseline,
+            "Random Init": random_init,
+            "Sine Basis": sine,
             "Eval Time (s)": eval_time,
             "Test AUC": test_auc,
             "Test Accuracy": test_acc,
@@ -250,15 +271,15 @@ class QuantumKANTrainer:
             "Test Loss": test_loss,
             "Confusion Matrix": cm.tolist()
         }
+        metrics_dic.update(efficiency_metrics)
 
-        import os, json
-        os.makedirs(os.path.dirname(metrics_path), exist_ok=True)
+        import json
         with open(metrics_path, 'w') as f:
             json.dump(metrics_dic, f, indent=4)
 
         return metrics_dic
 
-    def evaluate_baseline(self, X_test, y_test, eval_backend="noisy"):
+    def evaluate_baseline(self, X_test, y_test, eval_backend="noisy", random_init=False, sine=False):
         """
         Evaluate the freshly warm-started (untrained) QKAN, before any quantum
         fine-tuning, using the exact same metrics/plot pipeline as evaluate()
@@ -280,7 +301,8 @@ class QuantumKANTrainer:
         under eval_backend.
         """
         print(f"\n[Q-Trainer] Baseline evaluation (untrained, warm-start only). Backend: '{eval_backend}'")
-        metrics = self.evaluate(X_test, y_test, eval_backend=eval_backend, baseline=True)
+        metrics = self.evaluate(X_test, y_test, eval_backend=eval_backend, baseline=True,
+                                random_init=random_init, sine=sine)
 
         if self.model.backend_mode != self.train_backend:
             print(f"[Q-Trainer] Restoring backend to '{self.train_backend}' for training...")

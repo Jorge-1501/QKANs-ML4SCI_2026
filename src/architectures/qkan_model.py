@@ -5,6 +5,8 @@ import torch.nn as nn
 import os
 import matplotlib.pyplot as plt
 
+from src.architectures.sine_basis import build_sine_grid
+
 
 class QKANModel(nn.Module):
     """
@@ -24,7 +26,7 @@ class QKANModel(nn.Module):
         the pruned classical graph marks as feeding into a real mult node
         (the depth/count of IsingZZ gates is now dynamic, not fixed).
 
-    EXPLICIT LIMITATION (this code doesn't hide it):
+    EXPLICIT LIMITATION:
     The hidden->output stage ("stage 2") cannot re-upload a hidden node's
     value with a new exact DRU encoding, because that value lives in a
     qubit's accumulated phase/rotation, not as a classical number readable
@@ -37,7 +39,7 @@ class QKANModel(nn.Module):
     the QKAN paper).
     """
 
-    def __init__(self, graph_path, backend_mode="ideal"):
+    def __init__(self, graph_path, backend_mode="ideal", random_init=False):
         super().__init__()
 
         if not os.path.exists(graph_path):
@@ -47,6 +49,10 @@ class QKANModel(nn.Module):
         self.n_qubits = graph["n_qubits"]
         self.active_inputs = graph["active_inputs"]
         self.degree = graph["degree"]
+        self.basis = graph.get("basis", "chebyshev")
+        if self.basis == "sine":
+            # Fixed (non-trainable) SineKAN grid: theta_k(x) = freq_k * x + phase_k
+            self._sine_freq, self._sine_phase = build_sine_grid(self.degree, is_first=True)
 
         # ------------------------------------------------------------
         # Building the STATIC PLAN (once, not inside the circuit)
@@ -119,14 +125,25 @@ class QKANModel(nn.Module):
         # Trainable parameters (one per edge/transfer, shape (degree+1,)
         # for re-uploading edges, scalar for IsingZZ/output)
         # ------------------------------------------------------------
-        self.edge_weights = nn.Parameter(
-            torch.stack([torch.tensor(e["coefs"], dtype=torch.float32) for e in edge_table])
-            if edge_table else torch.zeros((0, self.degree + 1))
-        )
+        if random_init:
+            print("[QKAN] Random init: ignoring KAN-extracted coefficients, "
+                  "drawing edge/output weights from a standard normal instead.")
+            self.edge_weights = nn.Parameter(
+                torch.randn((len(edge_table), self.degree + 1), dtype=torch.float32)
+                if edge_table else torch.zeros((0, self.degree + 1))
+            )
+            self.output_weights = nn.Parameter(
+                torch.randn((len(output_table), self.degree + 1), dtype=torch.float32)
+            )
+        else:
+            self.edge_weights = nn.Parameter(
+                torch.stack([torch.tensor(e["coefs"], dtype=torch.float32) for e in edge_table])
+                if edge_table else torch.zeros((0, self.degree + 1))
+            )
+            self.output_weights = nn.Parameter(
+                torch.stack([torch.tensor(o["coefs"], dtype=torch.float32) for o in output_table])
+            )
         self.zz_weights = nn.Parameter(torch.zeros(len(zz_table)))
-        self.output_weights = nn.Parameter(
-            torch.stack([torch.tensor(o["coefs"], dtype=torch.float32) for o in output_table])
-        )
 
         self.backend_mode = backend_mode
         self.dev = self._initialize_device()
@@ -166,6 +183,14 @@ class QKANModel(nn.Module):
             qml.RZ(theta, wires=wire)
         qml.RY(weights[self.degree], wires=wire)
 
+    def _qkan_edge_sine(self, x_val, weights, wire):
+        """SineKAN-basis re-uploading on `wire`: per harmonic k, RY(A_k) then
+        RZ(freq_k * x + phase_k); the last weight (index `degree`) is a final RY."""
+        for k in range(self.degree):
+            qml.RY(weights[k], wires=wire)
+            qml.RZ(float(self._sine_freq[k]) * x_val + float(self._sine_phase[k]), wires=wire)
+        qml.RY(weights[self.degree], wires=wire)
+
     def _circuit(self, inputs):
         # --- Stage 1: inputs -> hidden nodes (free sum + mult via ZZ) ---
         for idx, edge in enumerate(self._edge_table):
@@ -177,7 +202,8 @@ class QKANModel(nn.Module):
             # column at once -- PennyLane's parameter broadcasting then
             # executes the full batch as one tape instead of one sample at a
             # time (see forward()).
-            self._qkan_edge(inputs[:, edge["in_col"]], self.edge_weights[idx], wire=edge["acc_wire"])
+            edge_fn = self._qkan_edge_sine if self.basis == "sine" else self._qkan_edge
+            edge_fn(inputs[:, edge["in_col"]], self.edge_weights[idx], wire=edge["acc_wire"])
 
         for idx, zz in enumerate(self._zz_table):
             qml.IsingZZ(self.zz_weights[idx], wires=[zz["wire_a"], zz["wire_b"]])

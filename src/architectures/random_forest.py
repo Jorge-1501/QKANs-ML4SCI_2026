@@ -102,6 +102,7 @@ class RandomForestTrainer:
         test_precision = precision_score(test_true, test_preds_binary)
         test_recall = recall_score(test_true, test_preds_binary)
         conf_matrix = confusion_matrix(test_true, test_preds_binary)
+        efficiency_metrics = viz.compute_efficiency_metrics(test_true, test_preds_probs)
 
         print("\n--- Metrics on the Test Set (Random Forest) ---")
         print(f"Test Loss: {test_loss:.5f}")
@@ -123,6 +124,7 @@ class RandomForestTrainer:
             "Test AUC": test_auc, "Test Precision": test_precision, "Test Recall": test_recall,
             "Confusion Matrix": conf_matrix.tolist()
         }
+        metrics.update(efficiency_metrics)
 
         return self.model, (test_true, test_preds_probs, test_preds_binary), metrics
 

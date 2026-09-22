@@ -1,8 +1,8 @@
-# Covers Change 1: src/architectures/extractor.py::_evaluate_isolated_edges
+# Covers src/architectures/extractor.py::_evaluate_isolated_edges
 """
-Unit tests for extraction now reading the numeric spline branch (act_fun)
+Unit tests for extraction reading the numeric spline branch (act_fun)
 instead of the symbolic branch (symbolic_fun), and for the subnode_bias/
-subnode_scale dimensional fix (Change 1).
+subnode_scale dimensional handling.
 
 Uses a real, tiny HEPKAN model (width=[3,[1,1],1]) instead of a full trained
 checkpoint, so the test runs in well under a second. This width has a

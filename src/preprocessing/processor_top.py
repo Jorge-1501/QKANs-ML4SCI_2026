@@ -243,8 +243,8 @@ def _compute_physics_features(raw_matrix, config, scaler=None):
 # ============================================================================
 # ============================================================================
 
-def load_and_preprocess_data(data_dir, task, seed=42, force_process=False, 
-    balance=False, apply_mass_cut=None):
+def load_and_preprocess_data(data_dir, task, seed=42, force_process=False,
+    balance=False, apply_mass_cut=None, full_dataset=False):
     """
     Processes separate train.h5, val.h5, and test.h5 files sequentially, then
     partitions each balanced split into n_subsets mutually disjoint, class-balanced
@@ -257,22 +257,18 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False,
     scripts) must find an existing cache; a cache miss with force_process=False
     raises RuntimeError instead of silently building it, so a --seed run can only
     ever select a subset, never construct one.
+
+    full_dataset=True forces apply_mass_cut=False and n_subsets=1: the entire dataset,
+    unpartitioned (train/val/test stay separate splits). The regime is resolved by
+    workspace.get_config, which also picks the canonical cache directory
+    (data/processed/<task>/<cut>/<full|n{N}>/), so different regimes never share a cache.
     """
-    config = get_config(task, seed)
-    if apply_mass_cut is not None:
-        config["apply_mass_cut"] = apply_mass_cut
+    config = get_config(task, seed, full_dataset=full_dataset, apply_mass_cut=apply_mass_cut)
+    resolved_mass_cut = config["apply_mass_cut"]
 
-    # Physically separate the canonical cache by mass-cut setting so switching the
-    # flag never silently reuses a cache built under a different setting.
-    resolved_mass_cut = config.get("apply_mass_cut", True)
-    mass_cut_suffix = "mass_cut" if resolved_mass_cut else "no_mass_cut"
-    config["canonical_data_dir"] = os.path.join(config["canonical_data_dir"], mass_cut_suffix)
-    config["canonical_cache_file"] = os.path.join(config["canonical_data_dir"], "preprocessed_subsets.pt")
-    config["canonical_scaler_path"] = os.path.join(config["canonical_data_dir"], "global_scaler.pkl")
-
-    n_subsets = config.get("n_subsets", 15)
+    n_subsets = config["n_subsets"]
     subset_split_seed = config.get("subset_split_seed", 37)
-    subset_id = seed % n_subsets
+    subset_id = config["subset_id"]
 
     DATA_DIR = Path(data_dir)
     canonical_dir = Path(config["canonical_data_dir"])
@@ -293,6 +289,18 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False,
                     f"currently requests n_subsets={n_subsets}. Re-run "
                     f"scripts/run_preprocessing.py with force_process=True to "
                     f"intentionally rebuild the canonical partition."
+                )
+            if "apply_mass_cut" not in cached_data:
+                # Caches built before this metadata existed: the regime is encoded in the
+                # directory name (workspace.get_config), so trust it rather than rebuild.
+                print(f"[CACHE] '{cache_file}' has no apply_mass_cut metadata (legacy cache); "
+                      f"trusting its directory ({config['variant']}).")
+            elif cached_data["apply_mass_cut"] != resolved_mass_cut:
+                raise RuntimeError(
+                    f"Cached canonical partition at '{cache_file}' was built with "
+                    f"apply_mass_cut={cached_data['apply_mass_cut']}, but this run "
+                    f"requests apply_mass_cut={resolved_mass_cut}. Rebuild it with "
+                    f"scripts/run_preprocessing.py --force."
                 )
             with open(scaler_file, "rb") as f:
                 scaler = pickle.load(f)
@@ -441,6 +449,7 @@ def load_and_preprocess_data(data_dir, task, seed=42, force_process=False,
         'n_subsets': n_subsets,
         'subset_split_seed': subset_split_seed,
         'apply_mass_cut': resolved_mass_cut,
+        'balance': balance,
         'mass_cut_lo': config.get("mass_cut_lo", 145.0),
         'mass_cut_hi': config.get("mass_cut_hi", 205.0),
     }

@@ -3,6 +3,36 @@ import numpy as np
 from sklearn.metrics import roc_curve, roc_auc_score, precision_recall_curve, auc
 import seaborn as sns
 
+
+def compute_efficiency_metrics(y_true, y_probs, signal_efficiency_points=(0.3, 0.5, 0.7, 0.9)):
+    """
+    Background efficiency/rejection at fixed signal-efficiency (TPR) working
+    points, read off the ROC curve -- the standard HEP convention, instead of
+    the raw (and possibly miscalibrated) 0.5 classifier threshold.
+
+    For each target signal efficiency, finds the smallest achieved TPR that is
+    >= the target and reports the FPR (background efficiency) at that point,
+    plus its reciprocal (background rejection; +inf when FPR is exactly 0).
+
+    Returns a flat dict of scalars (e.g. {"Sig Eff 0.3 - Bkg Eff": ...,
+    "Sig Eff 0.3 - Bkg Rejection": ...}) so it merges directly into an
+    existing metrics dict/JSON without needing list/dict JSON-stringification.
+    """
+    fpr, tpr, _ = roc_curve(y_true, y_probs)
+
+    metrics = {}
+    for target in signal_efficiency_points:
+        candidates = np.flatnonzero(tpr >= target)
+        idx = candidates[0] if candidates.size else len(tpr) - 1
+        bkg_eff = float(fpr[idx])
+        bkg_rejection = float("inf") if bkg_eff == 0.0 else 1.0 / bkg_eff
+        label = f"Sig Eff {target:g}"
+        metrics[f"{label} - Achieved Sig Eff"] = float(tpr[idx])
+        metrics[f"{label} - Bkg Eff"] = bkg_eff
+        metrics[f"{label} - Bkg Rejection"] = bkg_rejection
+
+    return metrics
+
 # Matplotlib parameters for consistent styling
 FONT_PARAMS = {'fontsize': 16, 'fontweight': 'bold'}
 TICK_PARAMS = {'fontsize': 12}

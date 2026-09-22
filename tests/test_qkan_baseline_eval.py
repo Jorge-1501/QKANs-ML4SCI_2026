@@ -1,6 +1,6 @@
-# Covers Change 2: src/architectures/quantum_kan.py::evaluate / evaluate_baseline
+# Covers src/architectures/quantum_kan.py::evaluate / evaluate_baseline
 """
-Unit tests for the baseline (pre-training) VQC evaluation added in Change 2.
+Unit tests for the baseline (pre-training) VQC evaluation.
 
 Builds a QuantumKANTrainer without going through __init__ (which would build a
 real PennyLane circuit via QKANModel) -- instead attaches a lightweight fake
@@ -51,7 +51,7 @@ def _make_trainer(tmp_path, monkeypatch, train_backend="ideal"):
     trainer.model = _FakeModel(backend_mode=train_backend)
 
     config = {"qkan_batch_size": 4}
-    for suffix in ("", "_baseline"):
+    for suffix in ("", "_baseline", "_random"):
         for backend in ("ideal", "noisy", "shots"):
             for metric, ext in (("roc", "png"), ("cm", "png"), ("pr", "png"), ("metrics", "json")):
                 key = f"{metric}_qkan{suffix}_{backend}"
@@ -61,6 +61,9 @@ def _make_trainer(tmp_path, monkeypatch, train_backend="ideal"):
             cm_normalized_key = f"cm_qkan{suffix}_{backend}_normalized"
             path = tmp_path / f"{cm_normalized_key}.png"
             config[cm_normalized_key] = str(path)
+            for eval_data_kind in ("true", "probs", "binary"):
+                key = f"qkan_eval_data_{eval_data_kind}{suffix}_{backend}"
+                config[key] = str(tmp_path / f"{key}.npy")
     trainer.config = config
     return trainer
 
@@ -102,3 +105,14 @@ def test_evaluate_baseline_restores_train_backend(tmp_path, monkeypatch):
     trainer.evaluate_baseline(X_test, y_test, eval_backend="noisy")
 
     assert trainer.model.backend_mode == "ideal"
+
+
+def test_evaluate_random_init_routes_to_random_keys_and_saves_eval_arrays(tmp_path, monkeypatch):
+    trainer = _make_trainer(tmp_path, monkeypatch)
+    X_test, y_test = _toy_test_set()
+
+    trainer.evaluate(X_test, y_test, eval_backend="ideal", random_init=True)
+
+    assert (tmp_path / "metrics_qkan_random_ideal.json").exists()
+    assert (tmp_path / "qkan_eval_data_probs_random_ideal.npy").exists()
+    assert not (tmp_path / "metrics_qkan_ideal.json").exists()

@@ -34,7 +34,7 @@ def main(args):
     torch.set_num_threads(4)
     workspace.set_seed(args.seed)
     
-    CONFIG = workspace.get_config(task="top", seed=args.seed)
+    CONFIG = workspace.get_config(task="top", seed=args.seed, full_dataset=args.full_dataset)
     workspace.make_dirs(CONFIG)
 
     log_file_path = os.path.join(CONFIG["logs_dir"], f"training_seed_{args.seed}.log")
@@ -56,7 +56,8 @@ def main(args):
         data_dir=top_path,
         task=CONFIG["task"],
         seed=args.seed,
-        force_process=False
+        force_process=False,
+        full_dataset=args.full_dataset
     )
 
     del top_path
@@ -71,9 +72,9 @@ def main(args):
     base_model_prefix = os.path.join(CONFIG["models_dir"], "01_base")
     base_model_state_path = f"{base_model_prefix}_state"
 
-    if os.path.exists(base_model_state_path) and not args.force:
+    base_trained_this_run = args.force or not os.path.exists(base_model_state_path)
+    if not base_trained_this_run:
         print(f"Base model found at {base_model_prefix}")
-        model_base = trainer.load_checkpoint(base_model_prefix)
     else:
         history_base = trainer.train_kan_model(
             width=CONFIG["width"],
@@ -81,7 +82,7 @@ def main(args):
             k=CONFIG["k"],
             learning_rate=CONFIG["base_lr"],
             num_epochs=CONFIG["base_epochs"],
-            batch_size=CONFIG["base_batch_size"], 
+            batch_size=CONFIG["base_batch_size"],
             early_stop_patience=CONFIG["base_patience"],
             early_stop_min_delta=CONFIG["base_early_stop_delta"],
             lamb=CONFIG["base_lamb"],
@@ -93,35 +94,41 @@ def main(args):
             model_save_path=base_model_prefix,
             X_train_tensor=X_train,
             y_train_tensor=y_train,
-            X_val_tensor=X_val, 
+            X_val_tensor=X_val,
             y_val_tensor=y_val,
             num_workers=CONFIG["num_workers"]
         )
-        
+
         with open(CONFIG["base_train_history_data"], 'w') as f:
             json.dump(history_base, f, indent=4)
 
         viz.plot_loss_history(history_base, save_path=CONFIG["base_train_loss_plot"])
         viz.plot_auc_history(history_base, save_path=CONFIG["base_train_auc_plot"])
+        clean_memory(history_base)
 
-        print("\n--- Evaluation of Base Model ---")
-        model_base, eval_data_base, metrics_base = trainer.evaluate_kan_model(
-            model_save_path=base_model_prefix,
-            X_test_tensor=X_test,
-            y_test_tensor=y_test,
-            conf_matrix_save_path=CONFIG["base_eval_cm"],
-            conf_matrix_normalized_save_path=CONFIG["base_eval_cm_normalized"],
-            save_path_roc_curve=CONFIG["base_eval_roc"],
-            save_path_pr_curve=CONFIG["base_eval_pr"]
-        )
+    # Evaluation always runs, even when training was skipped this run, so the
+    # metrics JSON/probability arrays feeding scripts/collect_metrics.py never
+    # go stale relative to a --force-free re-run (evaluate_kan_model loads the
+    # checkpoint from disk itself -- only retraining is worth skipping).
+    print("\n--- Evaluation of Base Model ---")
+    model_base, eval_data_base, metrics_base = trainer.evaluate_kan_model(
+        model_save_path=base_model_prefix,
+        X_test_tensor=X_test,
+        y_test_tensor=y_test,
+        conf_matrix_save_path=CONFIG["base_eval_cm"],
+        conf_matrix_normalized_save_path=CONFIG["base_eval_cm_normalized"],
+        save_path_roc_curve=CONFIG["base_eval_roc"],
+        save_path_pr_curve=CONFIG["base_eval_pr"]
+    )
 
-        np.save(CONFIG["base_eval_data_true"], eval_data_base[0])
-        np.save(CONFIG["base_eval_data_probs"], eval_data_base[1])
-        np.save(CONFIG["base_eval_data_binary"], eval_data_base[2])
+    np.save(CONFIG["base_eval_data_true"], eval_data_base[0])
+    np.save(CONFIG["base_eval_data_probs"], eval_data_base[1])
+    np.save(CONFIG["base_eval_data_binary"], eval_data_base[2])
 
-        with open(CONFIG["base_eval_metrics"], 'w') as f:
-            json.dump(metrics_base, f, indent=4)
+    with open(CONFIG["base_eval_metrics"], 'w') as f:
+        json.dump(metrics_base, f, indent=4)
 
+    if base_trained_this_run:
         print("\n--- Plotting Base Model Splines ---")
         model_base.plot(
             folder=CONFIG["base_model_plot_folder"],
@@ -133,8 +140,8 @@ def main(args):
             varscale=0.5
         )
 
-        print("Cleaning up base model from memory...")
-        clean_memory(model_base, eval_data_base, metrics_base, history_base)
+    print("Cleaning up base model from memory...")
+    clean_memory(model_base, eval_data_base, metrics_base)
 
 # ============================================================================
     # STEP 3: PRUNING
@@ -175,7 +182,8 @@ def main(args):
     retrained_model_prefix = os.path.join(CONFIG["retrained_model_path"], "03_retrained")
     retrained_model_state_path = f"{retrained_model_prefix}_state"
     
-    if os.path.exists(retrained_model_state_path) and not args.force:
+    retrain_trained_this_run = args.force or not os.path.exists(retrained_model_state_path)
+    if not retrain_trained_this_run:
         print(f"Skipping retraining. Model found")
     else:
         final_retrained_model, history_retrain = trainer.retrain_pruned_kan(
@@ -200,24 +208,26 @@ def main(args):
 
         viz.plot_loss_history(history_retrain, save_path=CONFIG["retrain_loss_plot"])
         viz.plot_auc_history(history_retrain, save_path=CONFIG["retrain_auc_plot"])
-        
-        print("\n--- Evaluation of Retrained Model ---")
-        model_retrained, eval_data_retrained, metrics_retrained = trainer.evaluate_kan_model(
-            model_save_path=retrained_model_prefix,
-            X_test_tensor=X_test, y_test_tensor=y_test,
-            conf_matrix_save_path=CONFIG["retrain_eval_cm"],
-            conf_matrix_normalized_save_path=CONFIG["retrain_eval_cm_normalized"],
-            save_path_roc_curve=CONFIG["retrain_eval_roc"],
-            save_path_pr_curve=CONFIG["retrain_eval_pr"]
-        )
+        clean_memory(final_retrained_model, history_retrain)
 
-        np.save(CONFIG["retrain_eval_data_true"], eval_data_retrained[0])
-        np.save(CONFIG["retrain_eval_data_probs"], eval_data_retrained[1])
-        np.save(CONFIG["retrain_eval_data_binary"], eval_data_retrained[2])
+    print("\n--- Evaluation of Retrained Model ---")
+    model_retrained, eval_data_retrained, metrics_retrained = trainer.evaluate_kan_model(
+        model_save_path=retrained_model_prefix,
+        X_test_tensor=X_test, y_test_tensor=y_test,
+        conf_matrix_save_path=CONFIG["retrain_eval_cm"],
+        conf_matrix_normalized_save_path=CONFIG["retrain_eval_cm_normalized"],
+        save_path_roc_curve=CONFIG["retrain_eval_roc"],
+        save_path_pr_curve=CONFIG["retrain_eval_pr"]
+    )
 
-        with open(CONFIG["retrain_eval_metrics"], 'w') as f:
-            json.dump(metrics_retrained, f, indent=4)
+    np.save(CONFIG["retrain_eval_data_true"], eval_data_retrained[0])
+    np.save(CONFIG["retrain_eval_data_probs"], eval_data_retrained[1])
+    np.save(CONFIG["retrain_eval_data_binary"], eval_data_retrained[2])
 
+    with open(CONFIG["retrain_eval_metrics"], 'w') as f:
+        json.dump(metrics_retrained, f, indent=4)
+
+    if retrain_trained_this_run:
         print("\n--- Plotting Retrained Model Splines ---")
         model_retrained.plot(
             folder=CONFIG["retrained_model_plot_folder"],
@@ -227,7 +237,7 @@ def main(args):
             scale=1.0, varscale=0.5
         )
 
-        clean_memory(model_retrained, eval_data_retrained, history_retrain, metrics_retrained)
+    clean_memory(model_retrained, eval_data_retrained, metrics_retrained)
 
     # ============================================================================
     # STEP 5: SYMBOLIC SIMPLIFICATION (FITTING)
@@ -235,7 +245,8 @@ def main(args):
     print("\n--- Step 5: Starting Symbolic Simplification ---")
     symbolic_model_prefix = os.path.join(CONFIG["symbolic_model_path"], "04_symbolic")
     symbolic_model_state_path = f"{symbolic_model_prefix}_state"
-    if os.path.exists(symbolic_model_state_path) and not args.force:
+    symbolic_trained_this_run = args.force or not os.path.exists(symbolic_model_state_path)
+    if not symbolic_trained_this_run:
         print(f"Symbolic model found, skipping simplification.")
     else:
         trainer.simplify_and_save(
@@ -246,22 +257,23 @@ def main(args):
             weight_simple=CONFIG["symbolic_weight_simple"]
         )
 
-        model_symbolic, eval_data_symbolic, metrics_symbolic = trainer.evaluate_kan_model(
-            model_save_path=symbolic_model_prefix,
-            X_test_tensor=X_test, y_test_tensor=y_test,
-            conf_matrix_save_path=CONFIG["symbolic_eval_cm"],
-            conf_matrix_normalized_save_path=CONFIG["symbolic_eval_cm_normalized"],
-            save_path_roc_curve=CONFIG["symbolic_eval_roc"],
-            save_path_pr_curve=CONFIG["symbolic_eval_pr"]
-        )
+    model_symbolic, eval_data_symbolic, metrics_symbolic = trainer.evaluate_kan_model(
+        model_save_path=symbolic_model_prefix,
+        X_test_tensor=X_test, y_test_tensor=y_test,
+        conf_matrix_save_path=CONFIG["symbolic_eval_cm"],
+        conf_matrix_normalized_save_path=CONFIG["symbolic_eval_cm_normalized"],
+        save_path_roc_curve=CONFIG["symbolic_eval_roc"],
+        save_path_pr_curve=CONFIG["symbolic_eval_pr"]
+    )
 
-        np.save(CONFIG["symbolic_eval_data_true"], eval_data_symbolic[0])
-        np.save(CONFIG["symbolic_model_eval_probs"], eval_data_symbolic[1])
-        np.save(CONFIG["symbolic_model_eval_binary"], eval_data_symbolic[2])
+    np.save(CONFIG["symbolic_eval_data_true"], eval_data_symbolic[0])
+    np.save(CONFIG["symbolic_model_eval_probs"], eval_data_symbolic[1])
+    np.save(CONFIG["symbolic_model_eval_binary"], eval_data_symbolic[2])
 
-        with open(CONFIG["symbolic_eval_metrics"], 'w') as f:
-            json.dump(metrics_symbolic, f, indent=4)
+    with open(CONFIG["symbolic_eval_metrics"], 'w') as f:
+        json.dump(metrics_symbolic, f, indent=4)
 
+    if symbolic_trained_this_run:
         print("\n--- Plotting Symbolic Model Splines ---")
         model_symbolic.plot(
             folder=CONFIG["symbolic_model_plot_folder"],
@@ -271,7 +283,7 @@ def main(args):
             scale=1.0, varscale=0.5
         )
 
-        clean_memory(model_symbolic, eval_data_symbolic, metrics_symbolic)
+    clean_memory(model_symbolic, eval_data_symbolic, metrics_symbolic)
 
     # ============================================================================
     # STEP 6: SYMBOLIC FINE-TUNING
@@ -348,6 +360,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Automated KAN Training Pipeline")
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     parser.add_argument("--force", action='store_true', help='Overwrite existing models')
+    parser.add_argument("--full-dataset", dest="full_dataset", action="store_true",
+                        help="Use the entire dataset: forces no mass cut and n_subsets=1 (train/val/test stay separate). "
+                             "Reads/writes the no_mass_cut/full variant directories. Default: off.")
     args = parser.parse_args()
     
     try:
@@ -355,3 +370,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nFatal error: {e}")
         traceback.print_exc()
+        sys.exit(1)

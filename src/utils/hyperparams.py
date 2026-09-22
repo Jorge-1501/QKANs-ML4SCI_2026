@@ -81,7 +81,7 @@ def get_hyperparams():
 
         # --- Chebyshev Extraction Hyperparameters ---
         # Fixed degree every edge is fit at (no R2-gated search) -- see
-        # reports/AUC_test/ for why an R2-gated minimum-degree search was
+        # reports/01_* to reports/04_* for why an R2-gated minimum-degree search was
         # tried and reverted.
         "chebyshev_max_degree": 4,
         "qkan_dynamic_range_threshold": 1e-3,
@@ -102,11 +102,11 @@ def get_hyperparams():
         # as-is by every seed/task run. random_state is intentionally NOT set
         # here: RandomForestTrainer passes the run's own --seed (config["seed"])
         # so the forest's internal randomness stays tied to the selected fold.
-        "rf_n_estimators": 500,
-        "rf_max_depth": None,
-        "rf_min_samples_split": 2,
-        "rf_min_samples_leaf": 1,
-        "rf_max_features": "sqrt",
+        "rf_n_estimators": 300,
+        "rf_max_depth": 35,
+        "rf_min_samples_split": 10,
+        "rf_min_samples_leaf": 5,
+        "rf_max_features": 0.35,
         "rf_class_weight": "balanced",
         "rf_n_jobs": -1,
 

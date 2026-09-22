@@ -1,12 +1,11 @@
 # src/utils/reporting.py
 # Collects the per-run/per-stage metrics JSON files that classic_kan.py /
 # quantum_kan.py already write (unchanged) into one long-format table, tagged by
-# task/seed/subset_id/model, for later Parquet export and cross-run tabular
+# task/seed/variant/subset_id/model, for later Parquet export and cross-run tabular
 # extraction/plotting. Pure collection -- no statistics (mean/std, ...) computed
 # here; that analysis is deliberately left for later, separate work.
 import json
 import os
-from pathlib import Path
 
 import pandas as pd
 
@@ -23,9 +22,16 @@ METRIC_REGISTRY = {
     "qkan_ideal": "metrics_qkan_ideal",
     "qkan_noisy": "metrics_qkan_noisy",
     "qkan_shots": "metrics_qkan_shots",
+    # Untrained ideal-device init comparison (scripts/eval_sine_baseline.py):
+    # qkan_baseline_ideal (Chebyshev warm start, written by train_qkan.py) vs.
+    # qkan_sine_baseline_ideal (SineKAN warm start) vs. qkan_baseline_random_ideal
+    # (random N(0,1) weights). qkan_random_ideal below is the *trained* random init.
     "qkan_baseline_ideal": "metrics_qkan_baseline_ideal",
+    "qkan_sine_baseline_ideal": "metrics_qkan_sine_baseline_ideal",
+    "qkan_baseline_random_ideal": "metrics_qkan_baseline_random_ideal",
     "qkan_baseline_noisy": "metrics_qkan_baseline_noisy",
     "qkan_baseline_shots": "metrics_qkan_baseline_shots",
+    "qkan_random_ideal": "metrics_qkan_random_ideal",
     "random_forest": "rf_eval_metrics",
 }
 
@@ -47,38 +53,49 @@ def _flatten_metrics_file(path, tags):
 
 
 def compute_run_statistics(task):
-    """Globs every outputs/<task>/seed_*/ directory actually present on disk, and
-    for each one, for every model/stage in METRIC_REGISTRY, collects that stage's
-    metrics JSON (if it exists) into one row tagged with task/seed/subset_id/model.
+    """Walks every run directory actually present under outputs/<task>/ (see
+    workspace.iter_run_dirs), and for each one, for every model/stage in
+    METRIC_REGISTRY, collects that stage's metrics JSON (if it exists) into one row
+    tagged with task/seed/variant/apply_mass_cut/n_subsets/subset_id/model.
 
     Despite the name, this is a COLLECTION function, not a statistical one: it
     does not compute mean/std or any other aggregate -- it only gathers and tags
     whatever per-run metrics already exist on disk into a single long-format
-    DataFrame (one row per (seed, model) pair found), ready for Parquet export and
+    DataFrame (one row per (run, model) pair found), ready for Parquet export and
     later analysis elsewhere. Missing seeds/stages (partial sweeps) are silently
     skipped, not errors.
+
+    The data regime tags come from each run's directory name (workspace's variant
+    layout), not from the current hyperparams.py, so a full-dataset run is never
+    mislabeled as one of n_subsets partitions. Pre-variant-layout runs are tagged
+    variant="legacy" with apply_mass_cut/n_subsets/subset_id left empty.
     """
-    root = workspace.get_project_root()
-    outputs_task_dir = Path(root) / "outputs" / task
-    seed_dirs = sorted(outputs_task_dir.glob("seed_*"))
-
     rows = []
-    for seed_dir in seed_dirs:
-        try:
-            seed = int(seed_dir.name.split("_", 1)[1])
-        except (IndexError, ValueError):
-            continue
+    for run in workspace.iter_run_dirs(task):
+        seed = run["seed"]
+        if run["legacy"]:
+            config = workspace.get_config(task, seed)
+        else:
+            config = workspace.get_config(
+                task, seed, apply_mass_cut=run["apply_mass_cut"], n_subsets=run["n_subsets"]
+            )
 
-        config = workspace.get_config(task, seed)
-        n_subsets = config.get("n_subsets", 15)
-        subset_id = seed % n_subsets
+        tags = {
+            "task": task,
+            "seed": seed,
+            "variant": run["variant"],
+            "apply_mass_cut": run["apply_mass_cut"],
+            "n_subsets": run["n_subsets"],
+            "subset_id": run["subset_id"],
+        }
 
         for model_name, config_key in METRIC_REGISTRY.items():
             path = config.get(config_key)
-            row = _flatten_metrics_file(
-                path,
-                tags={"task": task, "seed": seed, "subset_id": subset_id, "model": model_name},
-            )
+            if path:
+                # get_config's paths are rooted at the variant it was built for; re-root
+                # onto the directory actually found on disk (identical except for legacy runs).
+                path = os.path.join(run["path"], os.path.relpath(path, config["run_dir"]))
+            row = _flatten_metrics_file(path, tags={**tags, "model": model_name})
             if row is not None:
                 rows.append(row)
 

@@ -7,9 +7,12 @@ sys.path.append(str(Path(__file__).parent.parent.resolve()))
 from src.utils.workspace import get_config
 from src.preprocessing.processor_top import load_and_preprocess_data
 
-def main(task="top", seed=42, apply_mass_cut=None, force_process=False, balance=True):
-    # Load global configuration (task and seed)
-    config = get_config(task=task, seed=seed)
+def main(task="top", seed=42, apply_mass_cut=None, force_process=False, balance=True, full_dataset=False):
+    # Load global configuration (task and seed); full_dataset forces no mass cut + n_subsets=1
+    config = get_config(task=task, seed=seed, full_dataset=full_dataset, apply_mass_cut=apply_mass_cut)
+    print(f"Preprocessing regime: {config['variant']} "
+          f"(apply_mass_cut={config['apply_mass_cut']}, n_subsets={config['n_subsets']}) "
+          f"-> {config['canonical_data_dir']}")
     top_path = os.path.join(config["raw_data_dir"], "top")
 
     # Run the pipeline
@@ -21,6 +24,7 @@ def main(task="top", seed=42, apply_mass_cut=None, force_process=False, balance=
         apply_mass_cut=apply_mass_cut,
         seed=seed,
         balance=balance,
+        full_dataset=full_dataset,
     )
 
     print("Preprocessing pipeline completed successfully.")
@@ -54,7 +58,18 @@ if __name__ == "__main__":
         default=True,
         help="Balance the classes in the dataset."
     )
+    parser.add_argument(
+        "--full-dataset",
+        dest="full_dataset",
+        action="store_true",
+        help=(
+            "Use the entire dataset: forces no invariant-mass cut and n_subsets=1 "
+            "(train/val/test stay separate splits). Takes precedence over --mass-cut. "
+            "Cached under data/processed/<task>/no_mass_cut/full/. Default: off."
+        ),
+    )
     args = parser.parse_args()
 
-    main(task=args.task, seed=args.seed, apply_mass_cut=args.apply_mass_cut, 
-        force_process=args.force_process, balance=args.balance)
+    main(task=args.task, seed=args.seed, apply_mass_cut=args.apply_mass_cut,
+        force_process=args.force_process, balance=args.balance,
+        full_dataset=args.full_dataset)

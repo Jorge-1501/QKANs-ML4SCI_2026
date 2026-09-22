@@ -64,12 +64,42 @@ def test_compute_run_statistics_collects_only_existing_files_tagged_by_model(tmp
     assert set(df["model"].unique()) == {"classical_base", "qkan_ideal"}
     assert set(df["seed"].unique()) == {0, 1}
 
-    # subset_id = seed % n_subsets (default n_subsets=15) for every row.
+    # Regime tags come from the run directory (default regime: mass cut, n_subsets
+    # partitions), and subset_id = seed % n_subsets for every row.
+    n_subsets = workspace.get_config(task, 0)["n_subsets"]
     for _, row in df.iterrows():
-        assert row["subset_id"] == row["seed"] % 15
+        assert row["variant"] == f"mass_cut/n{n_subsets}_subset{row['seed'] % n_subsets}"
+        assert row["n_subsets"] == n_subsets
+        assert row["subset_id"] == row["seed"] % n_subsets
 
     # Pure collection: no mean/std/aggregate columns anywhere in the output.
     assert not any(col.lower() in ("mean", "std") for col in df.columns)
 
     base_rows = df[df["model"] == "classical_base"].sort_values("seed")
     assert list(base_rows["Test AUC"]) == [0.5, 0.51]
+
+
+def test_compute_run_statistics_tags_full_dataset_and_legacy_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(workspace, "get_project_root", lambda: tmp_path)
+    task = "top"
+
+    # A full-dataset run: seed 42 would be subset 2 of 5, but must NOT be tagged that way.
+    full_cfg = workspace.get_config(task, 42, full_dataset=True)
+    os.makedirs(os.path.dirname(full_cfg["base_eval_metrics"]), exist_ok=True)
+    with open(full_cfg["base_eval_metrics"], "w") as f:
+        json.dump({"Test AUC": 0.95}, f)
+
+    # A pre-variant-layout run sitting directly under outputs/<task>/seed_<N>/.
+    legacy_metrics = tmp_path / "outputs" / task / "seed_3" / "results" / "01_base" / "base_eval_metrics.json"
+    legacy_metrics.parent.mkdir(parents=True)
+    legacy_metrics.write_text(json.dumps({"Test AUC": 0.9}))
+
+    df = reporting.compute_run_statistics(task).set_index("seed")
+
+    assert df.loc[42, "variant"] == "no_mass_cut/full"
+    assert df.loc[42, "n_subsets"] == 1
+    assert df.loc[42, "subset_id"] == 0
+    assert not df.loc[42, "apply_mass_cut"]
+
+    assert df.loc[3, "variant"] == "legacy"
+    assert df.loc[3, "Test AUC"] == 0.9
