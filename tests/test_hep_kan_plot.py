@@ -2,15 +2,16 @@
 """
 Regression tests for the IndexError in HEPKAN.plot() when the model has more
 inputs than names in `in_vars` (e.g. width[0] > 22 while the feature-name list
-was hardcoded to 22), plus correct labelling of pruned models.
+has 22 entries), plus correct labelling of pruned models.
 """
 import types
 
-import pytest
 import torch
 
 from src.architectures.hep_kan import HEPKAN
-from src.utils.hyperparams import build_feature_names, get_hyperparams
+from src.utils.hyperparams import get_hyperparams
+
+FEATURES = get_hyperparams()["features"]
 
 
 def _model_with_data(n_in, hidden=(2, 0)):
@@ -21,22 +22,11 @@ def _model_with_data(n_in, hidden=(2, 0)):
 
 
 def test_plot_with_more_inputs_than_names(tmp_path):
-    model = _model_with_data(30)
+    model = _model_with_data(len(FEATURES) + 8)
     model.plot(
         folder=str(tmp_path / "edges"),
         save_path=str(tmp_path / "graph.png"),
-        in_vars=build_feature_names(22),  # 22 names for 30 inputs
-        varscale=0.5,
-    )
-    assert (tmp_path / "graph.png").exists()
-
-
-def test_plot_with_matching_names(tmp_path):
-    model = _model_with_data(30)
-    model.plot(
-        folder=str(tmp_path / "edges"),
-        save_path=str(tmp_path / "graph.png"),
-        in_vars=build_feature_names(30),
+        in_vars=FEATURES,
         varscale=0.5,
     )
     assert (tmp_path / "graph.png").exists()
@@ -54,28 +44,14 @@ def test_resolve_in_vars_truncates_extra_names():
 
 
 def test_resolve_in_vars_uses_surviving_ids_for_pruned_model():
-    names = build_feature_names(22)
     model = types.SimpleNamespace(input_id=torch.tensor([0, 5, 9]))
-    assert HEPKAN._resolve_in_vars(model, names, 3) == [names[0], names[5], names[9]]
+    assert HEPKAN._resolve_in_vars(model, FEATURES, 3) == [FEATURES[0], FEATURES[5], FEATURES[9]]
 
 
 def test_resolve_in_vars_ignores_stale_input_id():
     # input_id points past the name list -> fall back to padding, no crash
     model = types.SimpleNamespace(input_id=torch.tensor([0, 40]))
     assert HEPKAN._resolve_in_vars(model, ["a", "b"], 3) == ["a", "b", "x_3"]
-
-
-@pytest.mark.parametrize("n_inputs", [2, 22, 30, 42])
-def test_build_feature_names_length(n_inputs):
-    names = build_feature_names(n_inputs)
-    assert len(names) == n_inputs
-    assert names[:2] == ["m", "n"]
-
-
-@pytest.mark.parametrize("bad", [1, 0, 23])
-def test_build_feature_names_rejects_invalid(bad):
-    with pytest.raises(ValueError):
-        build_feature_names(bad)
 
 
 def test_config_width_matches_feature_names():

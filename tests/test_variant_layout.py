@@ -9,7 +9,8 @@ import pytest
 from src.utils import workspace
 
 # get_config keys that are intentionally shared by every regime.
-SHARED_KEYS = {"root", "raw_data_dir", "aggregate_dir", "metrics_table_path", "pipeline_logs_dir"}
+SHARED_KEYS = {"root", "raw_data_dir", "aggregate_dir", "metrics_table_path", "pipeline_logs_dir",
+               "sine_comparison_summary_path"}
 
 
 def _path_values(config):

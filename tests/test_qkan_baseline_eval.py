@@ -1,6 +1,6 @@
-# Covers Change 2: src/architectures/quantum_kan.py::evaluate / evaluate_baseline
+# Covers src/architectures/quantum_kan.py::evaluate / evaluate_baseline
 """
-Unit tests for the baseline (pre-training) VQC evaluation added in Change 2.
+Unit tests for the baseline (pre-training) VQC evaluation.
 
 Builds a QuantumKANTrainer without going through __init__ (which would build a
 real PennyLane circuit via QKANModel) -- instead attaches a lightweight fake

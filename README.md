@@ -1,8 +1,10 @@
-# Quantum Sinusoidal-Kolmogorov-Arnold-Networks for High Energy Physics
+# Quantum Sine-Kolmogorov-Arnold-Networks for High Energy Physics
 
 This repository contains the code developed for **QKAN**, a project for Google Summer of Code 2026 at [ML4SCI](https://ml4sci.org/).
 
 The project builds a classical **Kolmogorov-Arnold Network (KAN)** for High Energy Physics (HEP) jet classification, prunes it down to a small, interpretable topology, and extracts each surviving edge into a compact basis function representation, either **Chebyshev polynomials** (default) or a fixed-frequency **sine basis** ("SineKAN", [Reinhardt et al. 2024](https://arxiv.org/abs/2407.04149)). That extracted graph warm-starts a **Variational Quantum Circuit (QKAN)** built with [PennyLane](https://pennylane.ai/), which is then fine-tuned and evaluated on ideal, shot-noise, and noisy quantum backends. A classical Random Forest is trained alongside as a fast, strong reference point.
+
+A full technical summary of the method, results and conclusions is given in [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md).
 
 ---
 
@@ -28,10 +30,9 @@ Each jet is represented by 22 features: total jet mass `m`, particle multiplicit
 
 ## Current status / findings
 
-- **Warm-start comparison** (seeds 10–14, untrained circuit, ideal backend): Chebyshev mean AUC **0.698 ± 0.004** vs. SineKAN **0.644 ± 0.019** vs. random init **0.482 ± 0.029**. Both real warm starts clearly beat chance; the gap is attributed to Chebyshev's much better per-edge fit quality (R² ≈ 0.997–0.999 vs. sine's 0.49–0.61). See `reports/benchmarks/sine_vs_chebyshev_vs_random_baseline.md`.
-- **Baseline-AUC regression, found and fixed**: an adaptive minimum-degree Chebyshev search (accepting the first fit degree whose R² cleared a threshold) silently collapsed baseline AUC from ~0.80 to ~0.26–0.36 once training data shrank to 1/15 of the initial full pool. Root-caused and fixed by reverting to an unconditional fixed-degree-4 fit, restoring AUC to ≈0.80–0.81 uniformly across seeds. See `reports/AUC_test/` and `reports/implementations/reported_changes.md`.
-- **Quantum-baseline collapse investigation**: of 5 hypothesized causes for a separate confusion-matrix-collapse pattern (fixed 0.5 decision threshold, warm-start bias, aggressive pruning, weak gradients, a script/regime mismatch), 4 were tested and rejected. The confirmed driver is that classical pruning collapses most runs down to only ~2 surviving input features — a structural bottleneck that can't be loosened without pushing the qubit count past what the current simulator can evaluate in reasonable time. See `reports/benchmarks/baseline_quantum_collapse_investigation.md` and `baseline_quantum_collapse_solutions_tested.md`.
-- **Simulation performance (exploratory)**: a JAX + `default.qubit` reimplementation of the VQC forward/train step is ~129x faster than the current Torch + `lightning.qubit` path at today's circuit sizes (4–7 qubits); GPU shows no benefit yet at this scale. Not adopted in production. See `reports/benchmarks/vqc_jax_vs_torch_training_step.md`.
+- **Warm-start comparison** (seeds 10–14, untrained circuit, ideal backend): Chebyshev mean AUC **0.698 ± 0.004** vs. SineKAN **0.644 ± 0.019** vs. random init **0.482 ± 0.029**. Both real warm starts clearly beat chance; the gap is attributed to Chebyshev's much better per-edge fit quality (R² ≈ 0.997–0.999 vs. sine's 0.49–0.61). See `reports/09_warm_start_sine_vs_chebyshev_vs_random.md`.
+- **Baseline-AUC regression, found and fixed**: an adaptive minimum-degree Chebyshev search (accepting the first fit degree whose R² cleared a threshold) silently collapsed baseline AUC from ~0.80 to ~0.26–0.36 once training data shrank to 1/15 of the initial full pool. Root-caused and fixed by reverting to an unconditional fixed-degree-4 fit, restoring AUC to ≈0.80–0.81 uniformly across seeds. See `reports/01_qkan_baseline_auc_regression.md` to `reports/04_chebyshev_fixed_degree_full_seed_sweep.md`.
+- **Quantum-baseline collapse investigation**: of 5 hypothesized causes for a separate confusion-matrix-collapse pattern (fixed 0.5 decision threshold, warm-start bias, aggressive pruning, weak gradients, a script/regime mismatch), 4 were tested and rejected. The confirmed driver is that classical pruning collapses most runs down to only ~2 surviving input features — a structural bottleneck that can't be loosened without pushing the qubit count past what the current simulator can evaluate in reasonable time. See `reports/06_baseline_collapse_investigation.md` and `reports/08_baseline_collapse_fixes_evaluation.md`.
 
 ---
 
@@ -46,6 +47,8 @@ The repository includes:
 * `scripts/`: CLI entry points for data downloading, preprocessing, training, and evaluation (see below).
 * `tests/`: pytest suite.
 * `outputs/`, `data/`: generated/cached artifacts (see "Output files" below).
+* `reports/`: technical reports on individual experiments and investigations.
+* `PROJECT_SUMMARY.md`: technical summary of the project (data, architecture, warm-start strategies, results, conclusions).
 * `README.md`: this file.
 
 **Main files:**
@@ -95,32 +98,20 @@ pip freeze > requirements.txt      # then re-add the header lines (--extra-index
 ---
 
 ## Download datasets
-To improve the time of download we use aria2. We also need unzip to extract the Higgs file.
-
-Before running the download script, ensure you have `aria2` and `unzip` installed on your WSL/Linux environment. 
-
-### Installation on Ubuntu/Debian (WSL):
-Run the following command in your terminal:
+Downloads use `aria2` (installed automatically via `apt` if missing):
 
 ```bash
-sudo apt update && sudo apt install -y aria2 unzip
-```
-
-Once the prerequisites are installed, make the script executable and run it:
-```bash
+sudo apt update && sudo apt install -y aria2   # optional, the script does this if needed
 chmod +x download_data.sh
-./download_data.sh
+./download_data.sh             # top tagging only (train/val/test.h5 -> data/raw/top)
+./download_data.sh --with-qg   # also the quark-gluon dataset (-> data/raw/quark-gluon)
 ```
+
+The quark-gluon download is optional: the reported results only use top tagging.
 
 ### Resuming interrupted downloads
-If the download script fails or is interrupted due to network issues, you can safely run it again:
-```bash
-./download_data.sh
-```
-
-* Resuming: aria2 automatically handles partial downloads and will resume from where it left off.
-
-* Zenodo Edge Case: If the script successfully downloaded and renamed files like train.h5 or test.h5 before interrupting, running the script again might re-download them because the clean filenames no longer match the source URL query. If you want to avoid this, you can comment out the completed URLs inside the script before running it again, or simply let aria2 overwrite them. 
+If the download fails or is interrupted, just run the same command again. aria2 resumes partial
+downloads and skips files that are already complete.
 
 ---
 
@@ -151,14 +142,19 @@ python scripts/train_rf.py --task top --seed 42 [--full-dataset]
 python scripts/collect_metrics.py --task top
 ```
 
-### Basis comparison and sweeps
+### Basis comparison
 
 ```bash
 python scripts/eval_sine_baseline.py --seeds 10 11 12 13 14     # Chebyshev vs. SineKAN vs. random warm-start comparison
-scripts/run_all_classic.sh                                      # single seed, classical -> quantum -> metrics collection
-scripts/run_seeds.sh                                             # multi-seed sweep (self-backgrounding via nohup)
-scripts/run_seeds_random_init.sh                                 # random-VQC-init ablation
 ```
+
+### Reproducing all results (seeds 10–14)
+
+```bash
+scripts/reproduce_results.sh [--full-dataset] [--force] [--foreground]
+```
+
+This runs preprocessing, then for each seed: the classical KAN, the QKAN from the KAN warm start, the random-init QKAN ablation and the Random Forest baseline. It then runs the Chebyshev/sine/random comparison and rebuilds the metrics table. Stages whose checkpoint already exists are skipped unless you pass `--force`. By default the script runs in the background via nohup and logs to `outputs/top/pipeline_logs/`. Override the seeds with `SEEDS="10 11" scripts/reproduce_results.sh`.
 
 All paths are produced by `src/utils/workspace.py` (`get_config(task, seed, full_dataset=...)`); don't hardcode them.
 

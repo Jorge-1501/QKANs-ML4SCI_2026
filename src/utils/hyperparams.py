@@ -81,7 +81,7 @@ def get_hyperparams():
 
         # --- Chebyshev Extraction Hyperparameters ---
         # Fixed degree every edge is fit at (no R2-gated search) -- see
-        # reports/AUC_test/ for why an R2-gated minimum-degree search was
+        # reports/01_* to reports/04_* for why an R2-gated minimum-degree search was
         # tried and reverted.
         "chebyshev_max_degree": 4,
         "qkan_dynamic_range_threshold": 1e-3,

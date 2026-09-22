@@ -1,31 +1,48 @@
 #!/bin/bash
 
 # ==============================================================================
-# DATA DOWNLOAD & RESTRUCTURING PIPELINE
+# DATA DOWNLOAD PIPELINE
 # ==============================================================================
+# Usage: ./download_data.sh [--with-qg]
+#   (default)   top tagging dataset only (Zenodo record 2603256) -> data/raw/top
+#   --with-qg   also download the quark-gluon dataset (Zenodo record 19362155)
+#               -> data/raw/quark-gluon
+# Safe to re-run: aria2 resumes partial downloads and skips completed ones.
+
+WITH_QG=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-qg) WITH_QG=1 ;;
+        -h|--help)
+            sed -n '6,10p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $arg (usage: $0 [--with-qg])" >&2
+            exit 2
+            ;;
+    esac
+done
 
 # Locate the root directory of the local repository (where download_data.sh is located)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Define immutable raw data paths according to the workspace design
 RAW_TOP="$REPO_ROOT/data/raw/top"
+RAW_QG="$REPO_ROOT/data/raw/quark-gluon"
 
-# Guarantee the structural integrity of the raw data directory trees
 mkdir -p "$RAW_TOP"
+if [ $WITH_QG -eq 1 ]; then mkdir -p "$RAW_QG"; fi
 
 echo "System dependencies validation..."
 echo "--------------------------------------------------"
 
 # Runtime Dependency enforcement
-MISSING_DEPS=()
-if ! command -v aria2c &> /dev/null; then MISSING_DEPS+=("aria2"); fi
-if ! command -v unzip &> /dev/null; then MISSING_DEPS+=("unzip"); fi
-
-if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
-    echo "Missing required tools: ${MISSING_DEPS[*]}. Installing..."
-    sudo apt update && sudo apt install -y ${MISSING_DEPS[@]}
+if ! command -v aria2c &> /dev/null; then
+    echo "Missing required tool: aria2. Installing..."
+    sudo apt update && sudo apt install -y aria2
     if [ $? -ne 0 ]; then
-        echo "Automated setup failed. Please install dependencies manually."
+        echo "Automated setup failed. Please install aria2 manually."
         exit 1
     fi
 fi
@@ -40,17 +57,23 @@ F_TEMPORAL=$(mktemp)
 # ==============================================================================
 # Top Tagging Datasets
 # ==============================================================================
-# Mapping Top Tagging source files directly into their respective destination path
-echo "$RAW_TOP" > "$RAW_TOP/dir.path" # Tracking context hook
-echo "https://zenodo.org/records/2603256/files/test.h5?download=1" >> "$F_TEMPORAL"
-echo "  dir=$RAW_TOP" >> "$F_TEMPORAL"
-echo "  out=test.h5" >> "$F_TEMPORAL"
-echo "https://zenodo.org/records/2603256/files/train.h5?download=1" >> "$F_TEMPORAL"
-echo "  dir=$RAW_TOP" >> "$F_TEMPORAL"
-echo "  out=train.h5" >> "$F_TEMPORAL"
-echo "https://zenodo.org/records/2603256/files/val.h5?download=1" >> "$F_TEMPORAL"
-echo "  dir=$RAW_TOP" >> "$F_TEMPORAL"
-echo "  out=val.h5" >> "$F_TEMPORAL"
+# 'out=' gives each file its clean name directly (no '?download=1' suffix)
+for split in train val test; do
+    echo "https://zenodo.org/records/2603256/files/${split}.h5?download=1" >> "$F_TEMPORAL"
+    echo "  dir=$RAW_TOP" >> "$F_TEMPORAL"
+    echo "  out=${split}.h5" >> "$F_TEMPORAL"
+done
+
+# ==============================================================================
+# Quark-Gluon Datasets (optional, --with-qg)
+# ==============================================================================
+if [ $WITH_QG -eq 1 ]; then
+    for i in 0 1 2; do
+        echo "https://zenodo.org/records/19362155/files/QG_jets_fp32_${i}.npz?download=1" >> "$F_TEMPORAL"
+        echo "  dir=$RAW_QG" >> "$F_TEMPORAL"
+        echo "  out=QG_jets_fp32_${i}.npz" >> "$F_TEMPORAL"
+    done
+fi
 
 # Run aria2c reading from the unified mapped file configuration
 # -c  : Resume any partially completed downloads, skipping fully completed ones gracefully
@@ -62,48 +85,10 @@ ESTADO=$?
 rm "$F_TEMPORAL"
 
 echo "--------------------------------------------------"
-echo "Sanitizing filenames & cleaning URI query suffixes..."
-echo "--------------------------------------------------"
-
-# Post-processing Phase: Clean '?download=1' strings natively within each folder
-for folder in "$RAW_QG" "$RAW_TOP" "$RAW_HIGGS"; do
-    if [ -d "$folder" ]; then
-        (
-            cd "$folder" || exit
-            for file in *\?download=1; do
-                if [ -f "$file" ]; then
-                    mv "$file" "${file%\?download=1}"
-                fi
-            done
-        )
-    fi
-done
-
-# ==============================================================================
-# PHASE D: Post-Download Archive Extraction (HIGGS)
-# ==============================================================================
-# Nos aseguramos de ir a RAW_HIGGS de forma segura sin romper rutas previas o relativas
-(
-    cd "$RAW_HIGGS" || exit 1
-    ZIP_FILE="higgs.zip"
-
-    if [ -f "$ZIP_FILE" ]; then
-        echo "Extracting $ZIP_FILE in raw repository branch..."
-        unzip -oq "$ZIP_FILE"
-        if [ $? -eq 0 ]; then
-            echo "Extraction complete."
-            rm "$ZIP_FILE"
-            echo "Purged $ZIP_FILE to protect host storage space."
-        else
-            echo "Error unzipping $ZIP_FILE archive."
-        fi
-    fi
-)
-
-echo "--------------------------------------------------"
 if [ $ESTADO -eq 0 ]; then
     echo "Portability setup completed. Data environment is synchronized!"
 else
-    echo "Download complete but some transfer streams might have warned."
+    echo "Download finished with errors (aria2c exit code $ESTADO); re-run to resume."
 fi
 echo "--------------------------------------------------"
+exit $ESTADO

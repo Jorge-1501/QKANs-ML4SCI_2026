@@ -1,6 +1,6 @@
-# Covers Change 3: src/architectures/hep_kan.py::prune_fanin
+# Covers src/architectures/hep_kan.py::prune_fanin
 """
-Unit tests for the additive max-fan-in cap added to pruning (Change 3).
+Unit tests for the additive max-fan-in cap applied during pruning.
 
 Uses a lightweight fake model (plain objects exposing only the attributes
 prune_fanin() actually touches: act_fun[i].mask.data, edge_scores, log_history)
