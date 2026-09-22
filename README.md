@@ -2,9 +2,9 @@
 
 This repository contains the code developed for **QKAN**, a project for Google Summer of Code 2026 at [ML4SCI](https://ml4sci.org/).
 
-The project builds a classical **Kolmogorov-Arnold Network (KAN)** for High Energy Physics (HEP) jet classification, prunes it down to a small, interpretable topology, and extracts each surviving edge into a compact basis function representation, either **Chebyshev polynomials** (default) or a fixed-frequency **sine basis** ("SineKAN", [Reinhardt et al. 2024](https://arxiv.org/abs/2407.04149)). That extracted graph warm-starts a **Variational Quantum Circuit (QKAN)** built with [PennyLane](https://pennylane.ai/), which is then fine-tuned and evaluated on ideal, shot-noise, and noisy quantum backends. A classical Random Forest is trained alongside as a fast, strong reference point.
+The project builds a classical **Kolmogorov-Arnold Network (KAN)** for High Energy Physics (HEP) jet classification, prunes it down to a small, interpretable topology, and extracts each surviving edge into a compact basis function representation, either **Chebyshev polynomials** (default) or a fixed-frequency **sine basis** ("SineKAN", [Reinhardt et al. 2024](References.md#ref-reinhardt-2024)). That extracted graph warm-starts a **Variational Quantum Circuit (QKAN)** built with [PennyLane](https://pennylane.ai/), which is then fine-tuned and evaluated on ideal, shot-noise, and noisy quantum backends. A classical Random Forest is trained alongside as a fast, strong reference point.
 
-A full technical summary of the method, results and conclusions is given in [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md).
+A full technical summary of the method, results and conclusions is given in [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md). A report of the project is also available on the [author's web page](https://jorge-1501.github.io/en/investigacion/interdisciplinarios/qkan-jets/). The full bibliography is in [`References.md`](References.md).
 
 ---
 
@@ -15,7 +15,7 @@ A full technical summary of the method, results and conclusions is given in [`PR
 
 Each jet is represented by 22 features: total jet mass `m`, particle multiplicity `n`, and per-particle `DR_i`/`pT_i` for the 10 leading particles.
 
-**Data regime.** The balanced dataset is split once into **5 disjoint, class balanced statistical replicate subsets**. `--seed` selects the `seed % n_subsets`-th replicate and drives the *entire* pipeline (base training → pruning → retraining → extraction → quantum training/evaluation) on that one subset, so running several seeds gives independent end-to-end replicates instead of one full-dataset point estimate. `scripts/run_preprocessing.py` builds this canonical cache; every other script only selects from it (and raises if the cache doesn't exist yet).
+**Data regime.** The balanced dataset is split once into **5 disjoint, class-balanced subsets**, and each seed runs the *entire* pipeline on one of them, so several seeds give independent end-to-end replicates (see [Data regimes and directory layout](#data-regimes-and-directory-layout)).
 
 **Pipeline.**
 1. **Base KAN training**. `src/architectures/classic_kan.py`, the base [pykan](https://github.com/KindXiaoming/pykan)-derived KAN trainer.
@@ -41,25 +41,21 @@ Each jet is represented by 22 features: total jet mass `m`, particle multiplicit
 The repository includes:
 * `notebooks/`: exploratory data analysis (`EDA_top.ipynb`), a step-by-step walkthrough of the training process (`Training_process.ipynb`), and results analysis (`Results.ipynb`).
 * `src/`: code for the project.
-  * `architectures/`. model implementations: `classic_kan.py`, `hep_kan.py`, `extractor.py`, `sine_basis.py`/`extractor_sine.py`, `qkan_model.py`, `quantum_kan.py`, `random_forest.py`.
+  * `architectures/`: model implementations.
+    * `classic_kan.py`: base KAN trainer, extended by HEP-KAN.
+    * `hep_kan.py`: HEP-KAN model (pykan subclass) and pruning.
+    * `extractor.py`: Chebyshev warm-start extraction from the pruned classical KAN into a quantum-ready graph (`sine_basis.py`/`extractor_sine.py` for the SineKAN basis).
+    * `qkan_model.py`: the PennyLane variational quantum circuit (`QKANModel`).
+    * `quantum_kan.py`: quantum training/evaluation loop (`QuantumKANTrainer`).
+    * `random_forest.py`: classical Random Forest baseline.
   * `preprocessing/`: `balance.py` (class balancing + `n_subsets`-way subset split, 5 by default), `processor_top.py`, `processor_qg.py`.
   * `utils/`: `hyperparams.py`, `workspace.py` (path/config resolution), `metrics.py`, `reporting.py` (metrics aggregation), `evaluate_qkan.py`.
-* `scripts/`: CLI entry points for data downloading, preprocessing, training, and evaluation (see below).
+* `scripts/`: CLI entry points for preprocessing, training, and evaluation (`train_kan.py` for HEP-KAN, `train_qkan.py` for warm-start extraction + quantum training/evaluation; see below).
 * `tests/`: pytest suite.
 * `outputs/`, `data/`: generated/cached artifacts (see "Output files" below).
 * `reports/`: technical reports on individual experiments and investigations.
 * `PROJECT_SUMMARY.md`: technical summary of the project (data, architecture, warm-start strategies, results, conclusions).
-* `README.md`: this file.
-
-**Main files:**
-* `src/architectures/hep_kan.py`: HEP-KAN model architecture (Kolmogorov-Arnold repr., modified for HEP data).
-* `src/architectures/classic_kan.py`: Base KAN model implementation extended by HEP-KAN.
-* `src/architectures/extractor.py`: Chebyshev warm-start extraction from a pruned classical KAN into a quantum-ready graph.
-* `src/architectures/qkan_model.py`: The PennyLane variational quantum circuit (`QKANModel`).
-* `src/architectures/quantum_kan.py`: Quantum training/evaluation loop (`QuantumKANTrainer`).
-* `src/architectures/random_forest.py`: Classical Random Forest baseline.
-* `scripts/train_kan.py`: Script for training the HEP-KAN model.
-* `scripts/train_qkan.py`: Script for extracting the warm start and training/evaluating the quantum circuit.
+* `References.md`: bibliography.
 
 ---
 
@@ -101,17 +97,11 @@ pip freeze > requirements.txt      # then re-add the header lines (--extra-index
 Downloads use `aria2` (installed automatically via `apt` if missing):
 
 ```bash
-sudo apt update && sudo apt install -y aria2   # optional, the script does this if needed
-chmod +x download_data.sh
 ./download_data.sh             # top tagging only (train/val/test.h5 -> data/raw/top)
 ./download_data.sh --with-qg   # also the quark-gluon dataset (-> data/raw/quark-gluon)
 ```
 
-The quark-gluon download is optional: the reported results only use top tagging.
-
-### Resuming interrupted downloads
-If the download fails or is interrupted, just run the same command again. aria2 resumes partial
-downloads and skips files that are already complete.
+The quark-gluon download is optional: the reported results only use top tagging. If a download is interrupted, run the same command again; aria2 resumes partial files and skips complete ones.
 
 ---
 
@@ -130,7 +120,7 @@ outputs/<task>/<cut>/<full|n{N}_subset{k}>/seed_<seed>/       # one run: models/
 outputs/<task>/aggregate/metrics_table.parquet                # all runs, tagged by `variant`
 ```
 
-`<cut>` is `mass_cut` or `no_mass_cut` (top tagging only; quark-gluon has no mass cut). A run with `n_subsets=1` is labeled `full`; otherwise the directory name carries the partition count and the selected subset (e.g. `n5_subset3`).
+`<cut>` is `mass_cut` or `no_mass_cut` (top tagging only; quark-gluon has no mass cut). A run with `n_subsets=1` is labeled `full`; otherwise the directory name carries the partition count and the selected subset (e.g. `n5_subset3`). Only `scripts/run_preprocessing.py` builds the canonical cache; every other script only selects from it and raises if it doesn't exist yet.
 
 ### Top-tagging pipeline
 
@@ -162,13 +152,7 @@ All paths are produced by `src/utils/workspace.py` (`get_config(task, seed, full
 
 ## Output files
 
-The output files generated by the training and evaluation scripts are typically stored in a designated directory (`outputs/`). These files may include:
-* Model checkpoints: Saved states of the trained model, usually in `.pt` or `.ckpt` format.
-* Training logs: Logs containing information about the training process, such as loss and accuracy metrics.
-* Evaluation results: Files containing the performance metrics of the trained model on the test dataset.
-* Plots and visualizations: Graphical representations of the training progress and evaluation results.
-
-The resulting output files are generated in the `outputs/` directory, organized according to their type (checkpoints, logs, evaluation results, and visualizations). With the current structure of the repository, you can easily locate and manage the outputs corresponding to different runs and experiments and you don't need to create manually any subdirectories. Also, if you want to see the current results from the author, you can access [this drive file](https://drive.google.com/drive/folders/1elF53g99h0OQvAfiQd8k2qCoYObbV1o6?usp=sharing).
+Each run writes its checkpoints (`models/`), plots, evaluation results and logs into its own run directory under `outputs/` (layout in [Data regimes and directory layout](#data-regimes-and-directory-layout)); subdirectories are created automatically. `scripts/collect_metrics.py` gathers all runs into `outputs/<task>/aggregate/metrics_table.parquet`. The author's current results are available in [this Drive folder](https://drive.google.com/drive/folders/1elF53g99h0OQvAfiQd8k2qCoYObbV1o6?usp=sharing).
 
 ---
 
@@ -189,8 +173,9 @@ MIT License, © 2026 Jorge Toral. See [LICENSE](LICENSE).
 
 ---
 
-## Acknowledgements / References
+## Acknowledgements
 
 * Kolmogorov-Arnold Networks — [pykan](https://github.com/KindXiaoming/pykan) (installed from GitHub; the project's modifications live in `src/architectures/hep_kan.py` as a subclass, not in a fork).
-* SineKAN — Reinhardt et al., 2024, [arXiv:2407.04149](https://arxiv.org/abs/2407.04149).
 * [ML4SCI](https://ml4sci.org/) / Google Summer of Code 2026.
+
+Full bibliography: [`References.md`](References.md).
