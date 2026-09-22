@@ -301,8 +301,35 @@ class HEPKAN(KAN):
         y1 = 0.4 / np.maximum(max_num_weights, 5)
         y2 = 0.15 / np.maximum(max_neuron, 5)
  
+        def edge_alive(l, i, j):
+            return (self.symbolic_fun[l].mask[j][i].item() != 0.
+                    or self.act_fun[l].mask[i][j].item() != 0.)
+
+        def has_out(l, i):
+            return l < neuron_depth - 1 and any(edge_alive(l, i, j) for j in range(width_out[l + 1]))
+
+        def has_in(l, i):
+            return l > 0 and i < width[l][0] and any(edge_alive(l - 1, k, i) for k in range(width_in[l - 1]))
+
+        active = []
+        for l in range(neuron_depth):
+            act_l = []
+            for i in range(width_in[l]):
+                if l == 0:
+                    alive = has_out(l, i)
+                elif l == neuron_depth - 1:
+                    alive = has_in(l, i)
+                else:  
+                    # hidden: must be on a path (dead ends are not drawn)
+                    alive = has_out(l, i) and (has_in(l, i) or i >= width[l][0])
+                act_l.append(alive)
+            active.append(act_l)
+        # raw sum nodes of layer l+1: active if any incoming edge
+        raw_active = [[any(edge_alive(l, i, j) for i in range(width_in[l]))
+                       for j in range(width_out[l + 1])] for l in range(neuron_depth - 1)]
+
         fig, ax = plt.subplots(figsize=(10 * scale, 10 * scale * (neuron_depth - 1) * (y0 + z0)))
- 
+
         DC_to_FC = ax.transData.transform
         FC_to_NFC = fig.transFigure.inverted().transform
         DC_to_NFC = lambda x: FC_to_NFC(DC_to_FC(x))
@@ -310,6 +337,8 @@ class HEPKAN(KAN):
         for l in range(neuron_depth):
             n = width_in[l]
             for i in range(n):
+                if not active[l][i]:
+                    continue
                 plt.scatter(1 / (2 * n) + i / n, l * (y0 + z0), s=min_spacing ** 2 * 10000 * scale ** 2, color='black')
  
             for i in range(n):
@@ -351,6 +380,8 @@ class HEPKAN(KAN):
                             current_mult_arity = ma
                         j = width[l + 1][0] + mult_id
                         current_mult_arity -= 1
+                    if not active[l + 1][j]:
+                        continue
                     plt.plot([1 / (2 * n_in) + i / n_in, 1 / (2 * n_out) + j / n_out], [l * (y0 + z0) + y0, (l + 1) * (y0 + z0)], color='black', lw=2 * scale)
  
             plt.xlim(0, 1)
@@ -386,7 +417,7 @@ class HEPKAN(KAN):
             for j in range(n):
                 id_ = j
                 path = os.path.join(kan_dir, "assets", "img", "sum_symbol.png")
-                if os.path.exists(path):
+                if raw_active[l][j] and os.path.exists(path):
                     im = plt.imread(path)
                     left = DC_to_NFC([1 / (2 * N) + id_ / N - y2, 0])[0]
                     right = DC_to_NFC([1 / (2 * N) + id_ / N + y2, 0])[0]
@@ -402,7 +433,7 @@ class HEPKAN(KAN):
             for j in range(n_mult):
                 id_ = j + n_sum
                 path = os.path.join(kan_dir, "assets", "img", "mult_symbol.png")
-                if os.path.exists(path):
+                if active[l + 1][id_] and os.path.exists(path):
                     im = plt.imread(path)
                     left = DC_to_NFC([1 / (2 * N) + id_ / N - y2, 0])[0]
                     right = DC_to_NFC([1 / (2 * N) + id_ / N + y2, 0])[0]
@@ -415,13 +446,22 @@ class HEPKAN(KAN):
         if in_vars is not None:
             n = self.width_in[0]
             in_labels = self._resolve_in_vars(in_vars, n)
+            rotate = n > 1  # several inputs: slant labels 45 deg so they don't overlap
             for i in range(n):
+                if not active[0][i]:
+                    continue
                 text_var = f'${sympy.latex(in_labels[i])}$' if isinstance(in_labels[i], sympy.Expr) else in_labels[i]
-                plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), -0.1, text_var, fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
+                x_lab = 1 / (2 * (n)) + i / (n)
+                if rotate:
+                    plt.gcf().get_axes()[0].text(x_lab, -0.06, text_var, fontsize=40 * scale * varscale, rotation=45, rotation_mode='anchor', horizontalalignment='right', verticalalignment='top')
+                else:
+                    plt.gcf().get_axes()[0].text(x_lab, -0.1, text_var, fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
  
         if out_vars is not None:
             n = self.width_in[-1]
             for i in range(n):
+                if not active[-1][i]:
+                    continue
                 text_var = f'${sympy.latex(out_vars[i])}$' if isinstance(out_vars[i], sympy.Expr) else out_vars[i]
                 plt.gcf().get_axes()[0].text(1 / (2 * (n)) + i / (n), (y0 + z0) * (len(self.width) - 1) + 0.15, text_var, fontsize=40 * scale * varscale, horizontalalignment='center', verticalalignment='center')
  
